@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE article PUBLIC "-//NLM//DTD JATS (Z39.96) Journal Archiving and Interchange DTD v1.2 20190208//EN" "JATS-archivearticle1.dtd">
+<article xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:mml="http://www.w3.org/1998/Math/MathML" article-type="research-article">
+  <front>
+    <article-meta>
+      <title-group>
+        <article-title>Sample Article with Peer Review</article-title>
+      </title-group>
+      <contrib-group>
+        <contrib contrib-type="author">
+          <name>
+            <surname>Smith</surname>
+            <given-names>John</given-names>
+          </name>
+        </contrib>
+      </contrib-group>
+      <abstract>
+        <p>This is a test abstract.</p>
+      </abstract>
+    </article-meta>
+  </front>
+  <body>
+    <sec>
+      <title>Introduction</title>
+      <p>This is the introduction.</p>
+    </sec>
+  </body>
+  <sub-article article-type="decision-letter">
+    <front-stub>
+      <article-id pub-id-type="doi">10.1234/test.001</article-id>
+      <title-group>
+        <article-title>Decision Letter - Round 1</article-title>
+      </title-group>
+      <contrib-group>
+        <contrib contrib-type="author">
+          <name>
+            <surname>Editor</surname>
+            <given-names>Jane</given-names>
+          </name>
+          <role>Reviewing Editor</role>
+        </contrib>
+      </contrib-group>
+      <custom-meta-group>
+        <custom-meta>
+          <meta-name>peer-review-revision-round</meta-name>
+          <meta-value>1</meta-value>
+        </custom-meta>
+        <custom-meta>
+          <meta-name>peer-review-recommendation</meta-name>
+          <meta-value>major-revision</meta-value>
+        </custom-meta>
+      </custom-meta-group>
+    </front-stub>
+    <body>
+      <p>This manuscript presents interesting findings but requires major revisions.</p>
+    </body>
+  </sub-article>
+  <sub-article article-type="referee-report">
+    <front-stub>
+      <article-id pub-id-type="doi">10.1234/test.002</article-id>
+      <title-group>
+        <article-title>Referee Report - Round 1</article-title>
+      </title-group>
+      <contrib-group>
+        <contrib contrib-type="author">
+          <anonymous/>
+          <role>Reviewer</role>
+        </contrib>
+      </contrib-group>
+      <custom-meta-group>
+        <custom-meta>
+          <meta-name>peer-review-revision-round</meta-name>
+          <meta-value>1</meta-value>
+        </custom-meta>
+        <custom-meta>
+          <meta-name>peer-review-recommendation</meta-name>
+          <meta-value>minor-revision</meta-value>
+        </custom-meta>
+      </custom-meta-group>
+    </front-stub>
+    <body>
+      <p>The authors should address the following minor issues.</p>
+    </body>
+  </sub-article>
+  <sub-article article-type="author-comment">
+    <front-stub>
+      <article-id pub-id-type="doi">10.1234/test.003</article-id>
+      <title-group>
+        <article-title>Author Response - Round 1</article-title>
+      </title-group>
+      <custom-meta-group>
+        <custom-meta>
+          <meta-name>peer-review-revision-round</meta-name>
+          <meta-value>1</meta-value>
+        </custom-meta>
+      </custom-meta-group>
+    </front-stub>
+    <body>
+      <p>We thank the reviewers for their helpful comments and have addressed all issues.</p>
+    </body>
+  </sub-article>
+  <sub-article article-type="editor-report">
+    <front-stub>
+      <article-id pub-id-type="doi">10.1234/test.004</article-id>
+      <title-group>
+        <article-title>Editor Report - Round 2</article-title>
+      </title-group>
+      <contrib-group>
+        <contrib contrib-type="author">
+          <name>
+            <surname>Editor</surname>
+            <given-names>Jane</given-names>
+          </name>
+          <role>Reviewing Editor</role>
+        </contrib>
+      </contrib-group>
+      <custom-meta-group>
+        <custom-meta>
+          <meta-name>peer-review-revision-round</meta-name>
+          <meta-value>2</meta-value>
+        </custom-meta>
+        <custom-meta>
+          <meta-name>peer-review-recommendation</meta-name>
+          <meta-value>accept</meta-value>
+        </custom-meta>
+      </custom-meta-group>
+    </front-stub>
+    <body>
+      <p>The authors have satisfactorily addressed all concerns. Accepted for publication.</p>
+    </body>
+  </sub-article>
+</article>
