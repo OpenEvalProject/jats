@@ -118,16 +118,19 @@ def run_convert(parser: ArgumentParser, args: Namespace) -> None:
                 if sub_article.revision_round is None:
                     sub_article.revision_round = 1
 
-                # JATS4R article types for reviews/reports
+                # JATS4R article types for reviews/reports (including editor decisions)
                 if sub_article.article_type in [
-                    'decision-letter',
-                    'referee-report',
-                    'editor-report',
-                    'reviewer-report',
+                    'decision-letter',      # Editor decision, treated as reviewer
+                    'editor-report',        # Editor report, treated as reviewer
+                    'referee-report',       # Reviewer report
+                    'article-commentary',   # Reviewer report
                 ]:
                     decision_letters.append(sub_article)
                 # JATS4R article types for author responses
-                elif sub_article.article_type in ['author-comment', 'reply']:
+                elif sub_article.article_type in [
+                    'reply',                # Author response
+                    'author-comment',       # Author response
+                ]:
                     author_responses.append(sub_article)
 
             if not decision_letters and not author_responses:
