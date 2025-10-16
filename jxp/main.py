@@ -46,10 +46,11 @@ def setup_convert_args(subparsers) -> ArgumentParser:
         "--reviews",
         type=str,
         help=(
-            "Base path for extracting peer review materials (creates <path>_reviews.md and <path>_responses.md). "
-            "Extracts sub-articles with article-type: decision-letter, referee-report, editor-report, "
-            "reviewer-report, author-comment, or reply. Reviews and responses are organized by revision round "
-            "from JATS4R custom-meta 'peer-review-revision-round' (defaults to round 1 if not specified)."
+            "Base name for extracting peer review materials (creates reviews_v1.md, reviews_v2.md and "
+            "responses_v1.md, responses_v2.md). Extracts sub-articles with article-type: decision-letter, "
+            "referee-report, editor-report, reviewer-report, author-comment, or reply. Reviews and responses "
+            "are organized by revision round from JATS4R custom-meta 'peer-review-revision-round' (defaults "
+            "to round 1 if not specified)."
         ),
         default=None,
     )
@@ -83,10 +84,24 @@ def run_convert(parser: ArgumentParser, args: Namespace) -> None:
     # Convert to markdown
     markdown = convert_to_markdown(article)
 
-    # Output
+    # Determine manuscript version (default to v1 if no sub-articles or revision info)
+    manuscript_version = 1
+    if article.sub_articles:
+        # Get the maximum revision round from sub-articles
+        revision_rounds = [sa.revision_round for sa in article.sub_articles if sa.revision_round is not None]
+        if revision_rounds:
+            manuscript_version = max(revision_rounds)
+
+    # Output with version in filename
     if args.output:
-        args.output.write_text(markdown, encoding='utf-8')
-        print(f"Converted {args.xml} -> {args.output}", file=sys.stderr)
+        # Add version to output filename
+        output_path = Path(args.output)
+        output_stem = output_path.stem
+        output_suffix = output_path.suffix
+        versioned_output = output_path.parent / f"{output_stem}_v{manuscript_version}{output_suffix}"
+
+        versioned_output.write_text(markdown, encoding='utf-8')
+        print(f"Converted {args.xml} -> {versioned_output}", file=sys.stderr)
     else:
         print(markdown)
 
@@ -137,30 +152,40 @@ def run_convert(parser: ArgumentParser, args: Namespace) -> None:
                         responses_by_round[round_num] = []
                     responses_by_round[round_num].append(response)
 
-                # Combine all reviews into a single file
+                # Output separate review files per revision round
                 if reviews_by_round:
-                    review_path = Path(f"{args.reviews}_reviews.md")
-                    review_parts = []
-
                     for round_num in sorted(reviews_by_round.keys()):
+                        # Extract directory and base name from args.reviews
+                        review_base = Path(args.reviews)
+                        review_dir = review_base.parent
+                        review_name = review_base.name
+
+                        review_path = review_dir / f"reviews_v{round_num}.md"
+                        review_parts = []
+
                         for review in reviews_by_round[round_num]:
                             review_markdown = convert_review_to_markdown(review, round_num)
                             review_parts.append(review_markdown)
                             review_parts.append("\n---\n")  # Separator between reviews
 
-                    # Remove last separator
-                    if review_parts and review_parts[-1] == "\n---\n":
-                        review_parts.pop()
+                        # Remove last separator
+                        if review_parts and review_parts[-1] == "\n---\n":
+                            review_parts.pop()
 
-                    review_path.write_text('\n'.join(review_parts), encoding='utf-8')
-                    print(f"Extracted reviews -> {review_path}", file=sys.stderr)
+                        review_path.write_text('\n'.join(review_parts), encoding='utf-8')
+                        print(f"Extracted reviews (round {round_num}) -> {review_path}", file=sys.stderr)
 
-                # Combine all responses into a single file
+                # Output separate response files per revision round
                 if responses_by_round:
-                    response_path = Path(f"{args.reviews}_responses.md")
-                    response_parts = []
-
                     for round_num in sorted(responses_by_round.keys()):
+                        # Extract directory and base name from args.reviews
+                        response_base = Path(args.reviews)
+                        response_dir = response_base.parent
+                        response_name = response_base.name
+
+                        response_path = response_dir / f"responses_v{round_num}.md"
+                        response_parts = []
+
                         for response in responses_by_round[round_num]:
                             response_markdown = convert_response_to_markdown(
                                 response, article, round_num
@@ -168,12 +193,12 @@ def run_convert(parser: ArgumentParser, args: Namespace) -> None:
                             response_parts.append(response_markdown)
                             response_parts.append("\n---\n")  # Separator between responses
 
-                    # Remove last separator
-                    if response_parts and response_parts[-1] == "\n---\n":
-                        response_parts.pop()
+                        # Remove last separator
+                        if response_parts and response_parts[-1] == "\n---\n":
+                            response_parts.pop()
 
-                    response_path.write_text('\n'.join(response_parts), encoding='utf-8')
-                    print(f"Extracted responses -> {response_path}", file=sys.stderr)
+                        response_path.write_text('\n'.join(response_parts), encoding='utf-8')
+                        print(f"Extracted responses (round {round_num}) -> {response_path}", file=sys.stderr)
         else:
             print(
                 f"Warning: No sub-articles found in {args.xml}",
