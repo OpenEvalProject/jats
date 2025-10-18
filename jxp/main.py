@@ -1,5 +1,6 @@
 """Main CLI entry point for jxp."""
 
+import json
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter
 from pathlib import Path
@@ -10,7 +11,73 @@ from .converter import (
     convert_review_to_markdown,
     convert_to_markdown,
 )
-from .parser import parse_jats_xml
+from .parser import parse_jats_xml, parse_doi, parse_title, parse_abstract
+from lxml import etree
+
+
+def setup_metadata_args(subparsers) -> ArgumentParser:
+    """Setup the metadata command arguments."""
+    subparser = subparsers.add_parser(
+        "metadata",
+        description="Extract manuscript metadata (DOI, title, abstract) from JATS XML file.",
+        help="Extract manuscript metadata to JSON",
+        formatter_class=RawTextHelpFormatter,
+    )
+
+    subparser.add_argument("xml", type=Path, help="JATS XML file to process")
+
+    subparser.add_argument(
+        "-o",
+        "--output",
+        metavar="OUT",
+        type=Path,
+        help="Output JSON file (default: stdout)",
+        default=None,
+    )
+
+    return subparser
+
+
+def validate_metadata_args(parser: ArgumentParser, args: Namespace) -> None:
+    """Validate metadata command arguments."""
+    if not args.xml.exists():
+        parser.error(f"Input file does not exist: {args.xml}")
+
+    if not args.xml.suffix.lower() in [".xml", ".jats"]:
+        parser.error(f"Input file must be XML: {args.xml}")
+
+    if args.output and args.output.exists() and not args.output.is_file():
+        parser.error(f"Output path exists but is not a file: {args.output}")
+
+
+def run_metadata(parser: ArgumentParser, args: Namespace) -> None:
+    """Run the metadata command."""
+    validate_metadata_args(parser, args)
+
+    # Parse XML
+    tree = etree.parse(str(args.xml))
+    root = tree.getroot()
+
+    # Extract metadata
+    doi = parse_doi(root)
+    title = parse_title(root)
+    abstract = parse_abstract(root)
+
+    # Create metadata dictionary
+    metadata = {
+        "doi": doi,
+        "title": title,
+        "abstract": abstract
+    }
+
+    # Output JSON
+    json_output = json.dumps(metadata, indent=2, ensure_ascii=False)
+
+    if args.output:
+        args.output.write_text(json_output, encoding='utf-8')
+        print(f"Extracted metadata from {args.xml} -> {args.output}", file=sys.stderr)
+    else:
+        print(json_output)
 
 
 def setup_convert_args(subparsers) -> ArgumentParser:
@@ -219,6 +286,7 @@ def setup_parser():
     subparsers = parser.add_subparsers(dest="command", metavar="<CMD>")
 
     command_to_parser = {
+        "metadata": setup_metadata_args(subparsers),
         "convert": setup_convert_args(subparsers),
     }
 
@@ -236,6 +304,7 @@ def main() -> None:
     args = parser.parse_args()
 
     command_map = {
+        "metadata": run_metadata,
         "convert": run_convert,
     }
 

@@ -118,6 +118,14 @@ def parse_abstract(root: etree.Element) -> str:
     return ' '.join([p for p in text_parts if p])
 
 
+def parse_doi(root: etree.Element) -> str:
+    """Extract DOI from article metadata."""
+    doi_elem = root.find('.//article-id[@pub-id-type="doi"]')
+    if doi_elem is not None and doi_elem.text:
+        return doi_elem.text.strip()
+    return ""
+
+
 def load_manifest(manifest_path: Path) -> Dict[str, str]:
     """Load figure mappings from manifest.xml.
 
