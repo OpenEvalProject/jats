@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "JATS: Convert JATS XML articles to Markdown with peer review extraction"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "A. Sina Booeshaghi"}]
 keywords = ["jats", "xml", "markdown", "converter", "publishing", "biorxiv", "elife", "peer-review"]
 classifiers = [
