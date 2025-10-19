@@ -1,10 +1,10 @@
-# jxp - JATS XML Parser
+# jats - JATS XML Parser
 
 A Python CLI tool for converting JATS (Journal Article Tag Suite) XML files to Markdown format, with support for extracting peer review comments and author responses.
 
 ## Overview
 
-jxp parses JATS XML files from scientific publishers (bioRxiv, eLife, etc.) and converts them to clean, readable Markdown. It's particularly useful for working with preprint manuscripts and their associated peer review materials.
+jats parses JATS XML files from scientific publishers (bioRxiv, eLife, etc.) and converts them to clean, readable Markdown. It's particularly useful for working with preprint manuscripts and their associated peer review materials.
 
 ### Key Features
 
@@ -23,14 +23,14 @@ jxp parses JATS XML files from scientific publishers (bioRxiv, eLife, etc.) and 
 ### Install with uv (recommended)
 
 ```bash
-cd jxp
+cd jats
 uv pip install -e .
 ```
 
 ### Install with pip
 
 ```bash
-cd jxp
+cd jats
 pip install -e .
 ```
 
@@ -42,13 +42,13 @@ Convert a JATS XML file to Markdown:
 
 ```bash
 # Output to stdout
-jxp convert article.xml
+jats convert article.xml
 
 # Output to file
-jxp convert article.xml -o article.md
+jats convert article.xml -o article.md
 
 # With bioRxiv manifest file (optional)
-jxp convert article.xml -m manifest.xml -o article.md
+jats convert article.xml -m manifest.xml -o article.md
 ```
 
 ### Extract Peer Reviews
@@ -57,7 +57,7 @@ Extract peer review comments and author responses from JATS XML files that inclu
 
 ```bash
 # Extract reviews and responses to separate files
-jxp convert article.xml -o article.md -r output_base
+jats convert article.xml -o article.md -r output_base
 
 # Creates:
 # - output_base_reviews.md    (all review comments, organized by round)
@@ -75,14 +75,14 @@ Reviews and responses are automatically organized by revision round using JATS4R
 ### Convert bioRxiv Preprint
 
 ```bash
-jxp convert 2023.01.01.12345.xml -o paper.md
+jats convert 2023.01.01.12345.xml -o paper.md
 ```
 
 ### Convert eLife Article with Peer Reviews
 
 ```bash
 # Convert main article and extract reviews
-jxp convert elife-12345-v1.xml -o paper.md -r elife-12345-v1
+jats convert elife-12345-v1.xml -o paper.md -r elife-12345-v1
 
 # Output files:
 # - paper.md                        (main article)
@@ -94,12 +94,12 @@ jxp convert elife-12345-v1.xml -o paper.md -r elife-12345-v1
 
 ```bash
 # manifest.xml provides additional metadata
-jxp convert article.xml -m manifest.xml -o article.md
+jats convert article.xml -m manifest.xml -o article.md
 ```
 
 ## Input File Format
 
-jxp expects JATS XML files following the [JATS (Journal Article Tag Suite)](https://jats.nlm.nih.gov/) standard. This format is used by:
+jats expects JATS XML files following the [JATS (Journal Article Tag Suite)](https://jats.nlm.nih.gov/) standard. This format is used by:
 
 - **bioRxiv** and **medRxiv** preprint servers
 - **eLife** journal
@@ -124,7 +124,7 @@ bioRxiv articles may include an optional `manifest.xml` file that provides:
 
 ## Output Format
 
-jxp converts JATS XML to clean, readable Markdown with:
+jats converts JATS XML to clean, readable Markdown with:
 
 - Article title as H1 heading
 - Authors with affiliations
@@ -176,8 +176,8 @@ pytest
 ### Project Structure
 
 ```
-jxp/
-├── jxp/
+jats/
+├── jats/
 │   ├── __init__.py
 │   ├── main.py         # CLI entry point
 │   ├── parser.py       # JATS XML parsing

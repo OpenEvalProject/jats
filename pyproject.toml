@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "jxp"
+name = "jats"
 version = "0.1.0"
-description = "JATS XML Parser: Convert JATS XML articles to Markdown"
+description = "JATS: Convert JATS XML articles to Markdown with peer review extraction"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "A. Sina Booeshaghi"}]
-keywords = ["jats", "xml", "markdown", "converter", "publishing", "biorxiv", "elife"]
+keywords = ["jats", "xml", "markdown", "converter", "publishing", "biorxiv", "elife", "peer-review"]
 classifiers = [
     "Environment :: Console",
     "Intended Audience :: Science/Research",
@@ -34,15 +34,15 @@ dev = [
 ]
 
 [project.scripts]
-jxp = "jxp.main:main"
+jats = "jats.main:main"
 
 [tool.setuptools.packages.find]
-include = ["jxp", "jxp.*"]
+include = ["jats", "jats.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=jxp"
+addopts = "--cov=jats"
 
 [tool.ruff]
 line-length = 88

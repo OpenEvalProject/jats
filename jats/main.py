@@ -1,4 +1,4 @@
-"""Main CLI entry point for jxp."""
+"""Main CLI entry point for jats."""
 
 import json
 import sys
@@ -11,7 +11,7 @@ from .converter import (
     convert_review_to_markdown,
     convert_to_markdown,
 )
-from .parser import parse_jats_xml, parse_doi, parse_title, parse_abstract
+from .parser import parse_jats_xml, parse_doi, parse_title, parse_abstract, parse_pub_date
 from lxml import etree
 
 
@@ -19,7 +19,7 @@ def setup_metadata_args(subparsers) -> ArgumentParser:
     """Setup the metadata command arguments."""
     subparser = subparsers.add_parser(
         "metadata",
-        description="Extract manuscript metadata (DOI, title, abstract) from JATS XML file.",
+        description="Extract manuscript metadata (DOI, title, abstract, pub_date) from JATS XML file.",
         help="Extract manuscript metadata to JSON",
         formatter_class=RawTextHelpFormatter,
     )
@@ -62,12 +62,14 @@ def run_metadata(parser: ArgumentParser, args: Namespace) -> None:
     doi = parse_doi(root)
     title = parse_title(root)
     abstract = parse_abstract(root)
+    pub_date = parse_pub_date(root)
 
     # Create metadata dictionary
     metadata = {
         "doi": doi,
         "title": title,
-        "abstract": abstract
+        "abstract": abstract,
+        "pub_date": pub_date
     }
 
     # Output JSON
@@ -279,7 +281,7 @@ def run_convert(parser: ArgumentParser, args: Namespace) -> None:
 def setup_parser():
     """Create and configure the main argument parser."""
     parser = ArgumentParser(
-        description=f"jxp {__version__}: JATS XML Parser for scientific articles.",
+        description=f"jats {__version__}: JATS XML to Markdown converter with peer review extraction.",
         formatter_class=RawTextHelpFormatter,
     )
 
@@ -294,7 +296,7 @@ def setup_parser():
 
 
 def main() -> None:
-    """Main entry point for the jxp CLI."""
+    """Main entry point for the jats CLI."""
     parser, command_to_parser = setup_parser()
 
     if len(sys.argv) == 1:

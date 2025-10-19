@@ -126,6 +126,42 @@ def parse_doi(root: etree.Element) -> str:
     return ""
 
 
+def parse_pub_date(root: etree.Element) -> str:
+    """Extract publication date from article metadata.
+
+    Returns date in YYYY-MM-DD format, or empty string if not found.
+    """
+    # Look for pub-date with date-type="pub"
+    pub_date = root.find('.//pub-date[@date-type="pub"]')
+
+    # If not found, try pub-date with pub-type="epub" or just first pub-date
+    if pub_date is None:
+        pub_date = root.find('.//pub-date[@pub-type="epub"]')
+    if pub_date is None:
+        pub_date = root.find('.//pub-date')
+
+    if pub_date is None:
+        return ""
+
+    # Extract day, month, year
+    year_elem = pub_date.find('year')
+    month_elem = pub_date.find('month')
+    day_elem = pub_date.find('day')
+
+    year = year_elem.text.strip() if year_elem is not None and year_elem.text else ""
+    month = month_elem.text.strip() if month_elem is not None and month_elem.text else "01"
+    day = day_elem.text.strip() if day_elem is not None and day_elem.text else "01"
+
+    if not year:
+        return ""
+
+    # Pad month and day with leading zeros if needed
+    month = month.zfill(2)
+    day = day.zfill(2)
+
+    return f"{year}-{month}-{day}"
+
+
 def load_manifest(manifest_path: Path) -> Dict[str, str]:
     """Load figure mappings from manifest.xml.
 
