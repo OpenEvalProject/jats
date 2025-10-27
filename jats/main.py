@@ -11,7 +11,15 @@ from .converter import (
     convert_review_to_markdown,
     convert_to_markdown,
 )
-from .parser import parse_jats_xml, parse_doi, parse_title, parse_abstract, parse_pub_date
+from .parser import (
+    parse_jats_xml,
+    parse_doi,
+    parse_title,
+    parse_abstract,
+    parse_pub_date,
+    parse_authors,
+    parse_affiliations_detailed,
+)
 from lxml import etree
 
 
@@ -58,18 +66,49 @@ def run_metadata(parser: ArgumentParser, args: Namespace) -> None:
     tree = etree.parse(str(args.xml))
     root = tree.getroot()
 
-    # Extract metadata
+    # Extract basic metadata
     doi = parse_doi(root)
     title = parse_title(root)
     abstract = parse_abstract(root)
     pub_date = parse_pub_date(root)
+
+    # Extract author and affiliation data
+    authors, _ = parse_authors(root)  # Returns authors with basic affiliation text
+    affiliations_detailed = parse_affiliations_detailed(root)  # Returns structured affiliation data
+
+    # Convert authors to dict format for JSON
+    authors_list = []
+    for author in authors:
+        author_dict = {
+            "given_names": author.given_names,
+            "surname": author.surname,
+            "orcid": author.orcid,
+            "affiliation_ids": author.affiliation_ids,
+            "corresponding": author.corresponding,
+            "position": author.position
+        }
+        authors_list.append(author_dict)
+
+    # Convert affiliations to list format for JSON
+    affiliations_list = []
+    for aff_id, aff_data in affiliations_detailed.items():
+        aff_dict = {
+            "id": aff_id,
+            "institution": aff_data.get("institution"),
+            "department": aff_data.get("department"),
+            "city": aff_data.get("city"),
+            "country": aff_data.get("country")
+        }
+        affiliations_list.append(aff_dict)
 
     # Create metadata dictionary
     metadata = {
         "doi": doi,
         "title": title,
         "abstract": abstract,
-        "pub_date": pub_date
+        "pub_date": pub_date,
+        "authors": authors_list,
+        "affiliations": affiliations_list
     }
 
     # Output JSON

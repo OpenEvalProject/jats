@@ -9,6 +9,79 @@ from lxml import etree
 from .models import Article, Author, ContentItem, Figure, Reviewer, Section, SubArticle
 
 
+def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Optional[str]]]:
+    """Parse detailed affiliation information from JATS XML.
+
+    Returns:
+        Dictionary mapping affiliation IDs to structured affiliation data with keys:
+        - institution, department, city, country
+    """
+    contrib_group = root.find('.//contrib-group')
+    if contrib_group is None:
+        return {}
+
+    affiliations = {}
+    for aff in contrib_group.findall('.//aff'):
+        aff_id = aff.get('id', '')
+
+        # Extract structured affiliation data
+        institution = None
+        department = None
+        city = None
+        country = None
+
+        # Look for institution elements
+        inst_elems = aff.findall('.//institution')
+        if inst_elems:
+            # First, identify which elements are departments
+            dept_inst = None
+            non_dept_insts = []
+
+            for inst in inst_elems:
+                if inst.get('content-type') == 'dept' and inst.text:
+                    dept_inst = inst.text.strip()
+                elif inst.text:
+                    non_dept_insts.append(inst.text.strip())
+
+            # Set department if we found one
+            if dept_inst:
+                department = dept_inst
+
+            # Set institution from non-department institutions
+            if non_dept_insts:
+                if len(non_dept_insts) == 1:
+                    institution = non_dept_insts[0]
+                else:
+                    # Multiple institutions, concatenate them
+                    institution = ', '.join(non_dept_insts)
+            elif not dept_inst and inst_elems:
+                # No dept attribute found, treat first as institution
+                institution = inst_elems[0].text.strip() if inst_elems[0].text else None
+
+        # Look for city
+        city_elem = aff.find('.//named-content[@content-type="city"]')
+        if city_elem is not None and city_elem.text:
+            city = city_elem.text.strip()
+        elif aff.find('.//city') is not None:
+            city_elem = aff.find('.//city')
+            if city_elem.text:
+                city = city_elem.text.strip()
+
+        # Look for country
+        country_elem = aff.find('.//country')
+        if country_elem is not None and country_elem.text:
+            country = country_elem.text.strip()
+
+        affiliations[aff_id] = {
+            'institution': institution,
+            'department': department,
+            'city': city,
+            'country': country
+        }
+
+    return affiliations
+
+
 def parse_authors(root: etree.Element) -> Tuple[List[Author], Dict[str, str]]:
     """Parse author information from JATS XML.
 
@@ -43,7 +116,7 @@ def parse_authors(root: etree.Element) -> Tuple[List[Author], Dict[str, str]]:
 
     # Parse authors
     authors = []
-    for contrib in contrib_group.findall('.//contrib[@contrib-type="author"]'):
+    for position, contrib in enumerate(contrib_group.findall('.//contrib[@contrib-type="author"]'), start=1):
         # Get name
         name_elem = contrib.find('.//name')
         if name_elem is None:
@@ -63,27 +136,32 @@ def parse_authors(root: etree.Element) -> Tuple[List[Author], Dict[str, str]]:
                 'https://orcid.org/', ''
             )
 
-        # Get affiliation reference
-        affiliation_id = None
-        affiliation = None
-        aff_ref = contrib.find('.//xref[@ref-type="aff"]')
-        if aff_ref is not None:
+        # Get ALL affiliation references (not just first)
+        affiliation_ids = []
+        aff_refs = contrib.findall('.//xref[@ref-type="aff"]')
+        for aff_ref in aff_refs:
             aff_id = aff_ref.get('rid', '')
-            if aff_id in affiliations:
-                affiliation_id = aff_id
-                affiliation = affiliations[aff_id]
+            if aff_id and aff_id in affiliations:
+                affiliation_ids.append(aff_id)
 
         # Check if corresponding author
         corresponding = contrib.get('corresp') == 'yes'
+
+        # For backwards compatibility, set first affiliation as affiliation_id
+        affiliation_id = affiliation_ids[0] if affiliation_ids else None
+        affiliation = affiliations[affiliation_id] if affiliation_id else None
 
         authors.append(
             Author(
                 given_names=given_text,
                 surname=surname_text,
                 orcid=orcid,
+                affiliation_ids=affiliation_ids,
+                corresponding=corresponding,
+                position=position,
+                # Legacy fields
                 affiliation_id=affiliation_id,
                 affiliation=affiliation,
-                corresponding=corresponding,
             )
         )
 

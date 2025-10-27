@@ -11,9 +11,13 @@ class Author:
     given_names: str
     surname: str
     orcid: Optional[str] = None
+    affiliation_ids: List[str] = field(default_factory=list)  # Multiple affiliation IDs
+    corresponding: bool = False
+    position: Optional[int] = None  # Author order (1-indexed)
+
+    # Legacy fields for backwards compatibility
     affiliation_id: Optional[str] = None
     affiliation: Optional[str] = None
-    corresponding: bool = False
 
 
 @dataclass
