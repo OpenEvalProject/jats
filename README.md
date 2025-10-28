@@ -192,6 +192,27 @@ jats/
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed development documentation and code style guide.
 
+## Known Limitations and Future Work
+
+### Source Data Files
+
+Currently, `<supplementary-material>` elements (such as source data files for figures) are excluded from the markdown output. These typically appear as:
+
+```xml
+<supplementary-material id="fig6sdata1">
+  <label>Figure 6—source data 1.</label>
+  <caption>
+    <title>PDF files containing original western blots...</title>
+  </caption>
+  <media mimetype="application" mime-subtype="zip" xlink:href="..."/>
+</supplementary-material>
+```
+
+**Future Enhancement**: Add support for extracting and linking to source data files, including:
+- Source data download links
+- Separate source data manifest
+- Integration with figure references
+
 ## JATS Resources
 
 - [JATS Documentation](https://jats.nlm.nih.gov/)

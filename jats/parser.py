@@ -378,8 +378,16 @@ def parse_figures(
         caption = None
         caption_elem = fig.find('.//caption')
         if caption_elem is not None:
+            # Remove supplementary-material elements before processing
+            # (source data files that we don't want in the caption text)
+            for supp_mat in caption_elem.findall('.//supplementary-material'):
+                parent = supp_mat.getparent()
+                if parent is not None:
+                    parent.remove(supp_mat)
+
             caption_parts = []
             for elem in caption_elem.iter():
+                # Skip title elements
                 if elem.tag == 'title':
                     continue
                 if elem.text:
