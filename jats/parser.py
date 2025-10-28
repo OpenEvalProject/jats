@@ -14,7 +14,7 @@ def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Opti
 
     Returns:
         Dictionary mapping affiliation IDs to structured affiliation data with keys:
-        - institution, department, city, country
+        - institution, department, city, country, ror
     """
     contrib_group = root.find('.//contrib-group')
     if contrib_group is None:
@@ -29,6 +29,17 @@ def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Opti
         department = None
         city = None
         country = None
+        ror = None
+
+        # Look for ROR identifier
+        ror_elem = aff.find('.//institution-id[@institution-id-type="ror"]')
+        if ror_elem is not None and ror_elem.text:
+            ror_text = ror_elem.text.strip()
+            # Extract ROR ID from URL if present
+            if 'ror.org/' in ror_text:
+                ror = ror_text.split('ror.org/')[-1]
+            else:
+                ror = ror_text
 
         # Look for institution elements
         inst_elems = aff.findall('.//institution')
@@ -76,7 +87,8 @@ def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Opti
             'institution': institution,
             'department': department,
             'city': city,
-            'country': country
+            'country': country,
+            'ror': ror
         }
 
     return affiliations
@@ -97,10 +109,10 @@ def parse_authors(root: etree.Element) -> Tuple[List[Author], Dict[str, str]]:
     for aff in contrib_group.findall('.//aff'):
         aff_id = aff.get('id', '')
 
-        # Get all text from affiliation, excluding label
+        # Get all text from affiliation, excluding label and institution-id
         parts = []
         for elem in aff.iter():
-            if elem.tag == 'label':
+            if elem.tag in ['label', 'institution-id']:
                 continue
             if elem.text and elem.text.strip():
                 text = elem.text.strip().strip(',').strip()
@@ -204,6 +216,28 @@ def parse_doi(root: etree.Element) -> str:
     return ""
 
 
+def parse_references(root: etree.Element) -> Dict[str, str]:
+    """Parse references to build mapping of ref-id to DOI.
+
+    Returns:
+        Dictionary mapping reference IDs to DOIs
+    """
+    references = {}
+
+    for ref in root.findall('.//ref'):
+        ref_id = ref.get('id')
+        if not ref_id:
+            continue
+
+        # Look for DOI in pub-id elements
+        doi_elem = ref.find('.//pub-id[@pub-id-type="doi"]')
+        if doi_elem is not None and doi_elem.text:
+            doi = doi_elem.text.strip()
+            references[ref_id] = doi
+
+    return references
+
+
 def parse_pub_date(root: etree.Element) -> str:
     """Extract publication date from article metadata.
 
@@ -282,6 +316,43 @@ def load_manifest(manifest_path: Path) -> Dict[str, str]:
         return {}
 
 
+def build_figure_urls(
+    figures: Dict[str, Figure], article_id: str = None, is_elife: bool = False
+) -> Dict[str, str]:
+    """Build mapping of figure IDs to their image URLs.
+
+    Args:
+        figures: Dictionary of Figure objects
+        article_id: Article ID for constructing eLife URLs
+        is_elife: Whether this is an eLife article
+
+    Returns:
+        Dictionary mapping figure IDs to image URLs
+    """
+    figure_urls = {}
+
+    for fig_id, figure in figures.items():
+        # Determine image URL
+        if figure.file_path:
+            # Use manifest path if available (bioRxiv)
+            image_url = figure.file_path
+        elif figure.graphic_href:
+            graphic_href = figure.graphic_href
+            # For eLife articles, construct web URL
+            if is_elife and article_id:
+                # Convert .tif to .jpg for web display
+                base_filename = graphic_href.replace('.tif', '')
+                image_url = f"https://cdn.elifesciences.org/articles/{article_id}/{base_filename}.jpg"
+            else:
+                image_url = graphic_href
+        else:
+            continue
+
+        figure_urls[fig_id] = image_url
+
+    return figure_urls
+
+
 def parse_figures(
     root: etree.Element, figure_map: Optional[Dict[str, str]] = None
 ) -> Dict[str, Figure]:
@@ -343,8 +414,76 @@ def parse_figures(
     return figures
 
 
+def extract_text_with_citations(
+    elem: etree.Element,
+    references: Optional[Dict[str, str]] = None,
+    figure_urls: Optional[Dict[str, str]] = None
+) -> str:
+    """Extract text from element, converting citation and figure xrefs to markdown links.
+
+    Args:
+        elem: XML element to extract text from
+        references: Dictionary mapping ref-ids to DOIs
+        figure_urls: Dictionary mapping figure-ids to image URLs
+
+    Returns:
+        Text with citations and figure references converted to markdown links
+    """
+    if references is None:
+        references = {}
+    if figure_urls is None:
+        figure_urls = {}
+
+    parts = []
+
+    # Add element's text
+    if elem.text:
+        parts.append(elem.text)
+
+    # Process children
+    for child in elem:
+        # Handle citation xrefs
+        if child.tag == 'xref' and child.get('ref-type') == 'bibr':
+            ref_id = child.get('rid')
+            citation_text = ''.join(child.itertext()).strip()
+
+            # Convert to markdown link if DOI is available
+            if ref_id and ref_id in references:
+                doi = references[ref_id]
+                parts.append(f"[{citation_text}](https://doi.org/{doi})")
+            else:
+                # No DOI available, keep plain text
+                parts.append(citation_text)
+
+        # Handle figure xrefs
+        elif child.tag == 'xref' and child.get('ref-type') == 'fig':
+            fig_id = child.get('rid')
+            figure_text = ''.join(child.itertext()).strip()
+
+            # Convert to markdown link if figure URL is available
+            if fig_id and fig_id in figure_urls:
+                fig_url = figure_urls[fig_id]
+                parts.append(f"[{figure_text}]({fig_url})")
+            else:
+                # No URL available, keep plain text
+                parts.append(figure_text)
+
+        else:
+            # Recursively extract text from other elements
+            parts.append(extract_text_with_citations(child, references, figure_urls))
+
+        # Add tail text after child
+        if child.tail:
+            parts.append(child.tail)
+
+    return ''.join(parts)
+
+
 def parse_body(
-    root: etree.Element, figures: Optional[Dict[str, Figure]] = None
+    root: etree.Element,
+    figures: Optional[Dict[str, Figure]] = None,
+    references: Optional[Dict[str, str]] = None,
+    figure_urls: Optional[Dict[str, str]] = None
 ) -> List[Section]:
     """Parse article body sections.
 
@@ -353,6 +492,8 @@ def parse_body(
     """
     if figures is None:
         figures = {}
+    if figure_urls is None:
+        figure_urls = {}
 
     body = root.find('.//body')
     if body is None:
@@ -399,8 +540,8 @@ def parse_body(
                             )
                 else:
                     # Normal paragraph without embedded figures
-                    # Use itertext() to get all text in document order
-                    para_text = ''.join(child.itertext()).strip()
+                    # Extract text with citation and figure links
+                    para_text = extract_text_with_citations(child, references, figure_urls).strip()
                     if para_text:
                         section.content_items.append(
                             ContentItem(item_type='paragraph', text=para_text)
@@ -413,6 +554,15 @@ def parse_body(
                     section.content_items.append(
                         ContentItem(item_type='figure', figure=figures[fig_id])
                     )
+
+            elif child.tag == 'fig-group':
+                # Figure group containing multiple figures (eLife supplements)
+                for fig in child.findall('.//fig'):
+                    fig_id = fig.get('id')
+                    if fig_id and fig_id in figures:
+                        section.content_items.append(
+                            ContentItem(item_type='figure', figure=figures[fig_id])
+                        )
 
             elif child.tag == 'sec':
                 # Nested section - skip for now
@@ -634,15 +784,21 @@ def parse_jats_xml(xml_path: Path, manifest_path: Optional[Path] = None) -> Arti
     # Parse components
     title = parse_title(root)
     authors, affiliations = parse_authors(root)
+    affiliations_detailed = parse_affiliations_detailed(root)
+    references = parse_references(root)
     abstract = parse_abstract(root)
     figures = parse_figures(root, figure_map)
-    body = parse_body(root, figures)
+    figure_urls = build_figure_urls(figures, article_id, is_elife)
+    body = parse_body(root, figures, references, figure_urls)
     sub_articles = parse_sub_articles(root, figures)
 
     return Article(
         title=title,
         authors=authors,
         affiliations=affiliations,
+        affiliations_detailed=affiliations_detailed,
+        references=references,
+        figure_urls=figure_urls,
         abstract=abstract,
         body=body,
         sub_articles=sub_articles,

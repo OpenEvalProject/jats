@@ -81,7 +81,10 @@ class Article:
 
     title: str
     authors: List[Author] = field(default_factory=list)
-    affiliations: Dict[str, str] = field(default_factory=dict)  # id -> text
+    affiliations: Dict[str, str] = field(default_factory=dict)  # id -> text (legacy)
+    affiliations_detailed: Dict[str, Dict[str, Optional[str]]] = field(default_factory=dict)  # id -> structured data
+    references: Dict[str, str] = field(default_factory=dict)  # ref-id -> DOI
+    figure_urls: Dict[str, str] = field(default_factory=dict)  # figure-id -> image URL
     abstract: str = ""
     body: List[Section] = field(default_factory=list)
     sub_articles: List[SubArticle] = field(default_factory=list)

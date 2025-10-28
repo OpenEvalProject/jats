@@ -97,7 +97,15 @@ def convert_to_markdown(article: Article) -> str:
             md_parts.append("\n### Affiliations\n")
             for aff_id, aff_text in article.affiliations.items():
                 aff_num = aff_map.get(aff_id, '')
-                md_parts.append(f"{aff_num}. {aff_text}")
+                aff_line = f"{aff_num}. {aff_text}"
+
+                # Add ROR link if available in detailed affiliations
+                if article.affiliations_detailed and aff_id in article.affiliations_detailed:
+                    ror = article.affiliations_detailed[aff_id].get('ror')
+                    if ror:
+                        aff_line += f" ([ROR:{ror}](https://ror.org/{ror}))"
+
+                md_parts.append(aff_line)
 
         md_parts.append("")
         md_parts.append("† Corresponding author\n")

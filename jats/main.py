@@ -97,7 +97,8 @@ def run_metadata(parser: ArgumentParser, args: Namespace) -> None:
             "institution": aff_data.get("institution"),
             "department": aff_data.get("department"),
             "city": aff_data.get("city"),
-            "country": aff_data.get("country")
+            "country": aff_data.get("country"),
+            "ror": aff_data.get("ror")
         }
         affiliations_list.append(aff_dict)
 
