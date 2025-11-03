@@ -269,6 +269,139 @@ def run_convert(parser: ArgumentParser, args: Namespace) -> None:
                 print(f"Warning: No sub-articles found in {args.xml}", file=sys.stderr)
 
 
+def setup_find_args(subparsers) -> ArgumentParser:
+    """Setup the find command arguments."""
+    subparser = subparsers.add_parser(
+        "find",
+        description=(
+            "Find query strings in JATS XML and return precise XML-anchored locations.\n\n"
+            "Examples:\n"
+            "  jats find paper.xml --query \"protein expression\"\n"
+            "  jats find paper.xml --query \"claim 1\" --query \"claim 2\"\n"
+            "  jats find paper.xml --queries queries.txt -o matches.json\n"
+            "  jats find paper.xml --query \"Case Sensitive\" --case-sensitive\n"
+        ),
+        help="Find query strings in JATS XML",
+        formatter_class=RawTextHelpFormatter,
+    )
+
+    subparser.add_argument("xml", type=Path, help="JATS XML file to search")
+
+    subparser.add_argument(
+        "--query",
+        action="append",
+        dest="queries_list",
+        help="Query string to find (may be repeated)",
+    )
+
+    subparser.add_argument(
+        "--queries",
+        type=Path,
+        help="Text file with one query per line",
+    )
+
+    subparser.add_argument(
+        "-o",
+        "--output",
+        metavar="OUT",
+        type=Path,
+        help="Output JSON file (default: stdout)",
+        default=None,
+    )
+
+    subparser.add_argument(
+        "--case-sensitive",
+        action="store_true",
+        help="Perform case-sensitive matching (default: case-insensitive)",
+    )
+
+    return subparser
+
+
+def validate_find_args(parser: ArgumentParser, args: Namespace) -> None:
+    """Validate find command arguments."""
+    if not args.xml.exists():
+        parser.error(f"Input file does not exist: {args.xml}")
+
+    if not args.xml.suffix.lower() in [".xml", ".jats"]:
+        parser.error(f"Input file must be XML: {args.xml}")
+
+    # Must have at least one query source
+    if not args.queries_list and not args.queries:
+        parser.error("Must provide at least one query via --query or --queries")
+
+    # Validate queries file if provided
+    if args.queries:
+        if not args.queries.exists():
+            parser.error(f"Queries file does not exist: {args.queries}")
+        if not args.queries.is_file():
+            parser.error(f"Queries path is not a file: {args.queries}")
+
+    # Validate output path if provided
+    if args.output and args.output.exists() and not args.output.is_file():
+        parser.error(f"Output path exists but is not a file: {args.output}")
+
+
+def run_find(parser: ArgumentParser, args: Namespace) -> None:
+    """Run the find command."""
+    from .parser import find_text_locations
+
+    validate_find_args(parser, args)
+
+    # Collect queries from both sources
+    queries = []
+
+    # Add queries from --query arguments
+    if args.queries_list:
+        queries.extend(args.queries_list)
+
+    # Add queries from --queries file
+    if args.queries:
+        try:
+            queries_text = args.queries.read_text(encoding='utf-8')
+            # Split by lines, strip whitespace, skip empty lines
+            file_queries = [
+                line.strip()
+                for line in queries_text.splitlines()
+                if line.strip()
+            ]
+            queries.extend(file_queries)
+        except Exception as e:
+            parser.error(f"Error reading queries file: {e}")
+
+    if not queries:
+        parser.error("No queries provided (queries file may be empty)")
+
+    # Parse XML
+    try:
+        tree = etree.parse(str(args.xml))
+        root = tree.getroot()
+    except Exception as e:
+        print(f"Error parsing XML: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Find text locations
+    try:
+        results = find_text_locations(root, queries, args.case_sensitive)
+    except Exception as e:
+        print(f"Error finding text locations: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Format as JSON
+    json_output = json.dumps(results, indent=2, ensure_ascii=False)
+
+    # Output results
+    if args.output:
+        args.output.write_text(json_output, encoding='utf-8')
+        matches_found = sum(1 for r in results if 'start' in r)
+        print(
+            f"Found {matches_found}/{len(queries)} queries -> {args.output}",
+            file=sys.stderr
+        )
+    else:
+        print(json_output)
+
+
 def setup_parser():
     """Create and configure the main argument parser."""
     parser = ArgumentParser(
@@ -281,6 +414,7 @@ def setup_parser():
     command_to_parser = {
         "metadata": setup_metadata_args(subparsers),
         "convert": setup_convert_args(subparsers),
+        "find": setup_find_args(subparsers),
     }
 
     return parser, command_to_parser
@@ -299,6 +433,7 @@ def main() -> None:
     command_map = {
         "metadata": run_metadata,
         "convert": run_convert,
+        "find": run_find,
     }
 
     if args.command in command_map:

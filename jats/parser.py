@@ -191,21 +191,18 @@ def parse_title(root: etree.Element) -> str:
 
 
 def parse_abstract(root: etree.Element) -> str:
-    """Extract abstract text."""
+    """Extract abstract text.
+
+    Uses itertext() to match the text extraction used by find command
+    and extract_text_with_citations() for consistency.
+    """
     abstract = root.find('.//abstract')
     if abstract is None:
         return ""
 
-    text_parts = []
-    for elem in abstract.iter():
-        if elem.tag == 'title':
-            continue
-        if elem.text:
-            text_parts.append(elem.text.strip())
-        if elem.tail:
-            text_parts.append(elem.tail.strip())
-
-    return ' '.join([p for p in text_parts if p])
+    # Use itertext() for consistency with find and body paragraph extraction
+    # This ensures queries extracted from markdown can be found in XML
+    return ''.join(abstract.itertext()).strip()
 
 
 def parse_doi(root: etree.Element) -> str:
@@ -813,3 +810,240 @@ def parse_jats_xml(xml_path: Path, manifest_path: Optional[Path] = None) -> Arti
         is_elife=is_elife,
         article_id=article_id,
     )
+
+
+# ============================================================================
+# Text finding functionality
+# ============================================================================
+
+
+def get_element_xpath(element: etree.Element, root: etree.Element) -> str:
+    """Get deterministic XPath for an element with positional predicates.
+
+    Args:
+        element: Element to get XPath for
+        root: Root element of the document
+
+    Returns:
+        XPath string with positional predicates (e.g., /article/body/sec[1]/p[2])
+    """
+    if element == root:
+        return f"/{root.tag}"
+
+    path_parts = []
+    current = element
+
+    while current is not None and current != root:
+        parent = current.getparent()
+        if parent is None:
+            break
+
+        # Count position among siblings of same tag
+        siblings = [c for c in parent if c.tag == current.tag]
+        if len(siblings) > 1:
+            # Multiple siblings with same tag - add position
+            position = siblings.index(current) + 1  # 1-indexed
+            path_parts.insert(0, f"{current.tag}[{position}]")
+        else:
+            # Only child with this tag - no position needed
+            path_parts.insert(0, current.tag)
+
+        current = parent
+
+    # Build full path from root
+    return f"/{root.tag}/" + "/".join(path_parts)
+
+
+def normalize_text(text: str, case_sensitive: bool = False) -> str:
+    """Normalize text for matching.
+
+    Applies same normalization as markdown conversion:
+    - Normalize Unicode punctuation to ASCII equivalents
+    - Collapse runs of whitespace into single space
+    - Trim leading/trailing whitespace
+    - Optional case normalization
+
+    Args:
+        text: Text to normalize
+        case_sensitive: If False, convert to lowercase
+
+    Returns:
+        Normalized text
+    """
+    import re
+    import unicodedata
+
+    # Normalize Unicode to NFC form (canonical composition)
+    text = unicodedata.normalize('NFC', text)
+
+    # Replace Unicode punctuation with ASCII equivalents
+    # This handles smart quotes, em/en dashes, etc. commonly found in XML
+    replacements = {
+        '\u2018': "'",  # ' (left single quotation mark) -> '
+        '\u2019': "'",  # ' (right single quotation mark) -> '
+        '\u201a': "'",  # ‚ (single low-9 quotation mark) -> '
+        '\u201b': "'",  # ‛ (single high-reversed-9 quotation mark) -> '
+        '\u201c': '"',  # " (left double quotation mark) -> "
+        '\u201d': '"',  # " (right double quotation mark) -> "
+        '\u201e': '"',  # „ (double low-9 quotation mark) -> "
+        '\u201f': '"',  # ‟ (double high-reversed-9 quotation mark) -> "
+        '\u2013': '-',  # – (en dash) -> -
+        '\u2014': '--', # — (em dash) -> --
+        '\u2010': '-',  # ‐ (hyphen) -> -
+        '\u2011': '-',  # ‑ (non-breaking hyphen) -> -
+        '\u2012': '-',  # ‒ (figure dash) -> -
+        '\u2015': '--', # ― (horizontal bar) -> --
+    }
+    for unicode_char, ascii_char in replacements.items():
+        text = text.replace(unicode_char, ascii_char)
+
+    # Collapse whitespace (including newlines, tabs) to single space
+    normalized = re.sub(r'\s+', ' ', text.strip())
+    if not case_sensitive:
+        normalized = normalized.lower()
+    return normalized
+
+
+def is_text_block_element(element: etree.Element) -> bool:
+    """Check if element is a text block we should index.
+
+    We index block-level text elements, not inline formatting.
+    This matches the structure used in markdown conversion.
+
+    Args:
+        element: Element to check
+
+    Returns:
+        True if this is a text block element
+    """
+    text_block_tags = {
+        'p',            # Paragraph
+        'title',        # Section title
+        'article-title',  # Article title
+        'abstract',     # Abstract (may contain p elements, but also direct text)
+        'caption',      # Figure/table caption
+        'label',        # Figure/table label
+        'list-item',    # List item
+        'td',           # Table cell
+        'th',           # Table header
+    }
+    return element.tag in text_block_tags
+
+
+def find_text_locations(
+    root: etree.Element,
+    queries: List[str],
+    case_sensitive: bool = False
+) -> List[Dict]:
+    """Find locations of query strings in JATS XML.
+
+    Builds a normalized text representation of the document and finds exact
+    matches, returning precise XML-anchored locations.
+
+    Args:
+        root: Root element of JATS XML document
+        queries: List of query strings to find
+        case_sensitive: If False (default), perform case-insensitive matching
+
+    Returns:
+        List of match dictionaries, one per query. Each dict contains:
+        - query: The query string
+        - start: {"xpath": str, "char_offset": int} (if found)
+        - stop: {"xpath": str, "char_offset": int} (if found)
+        - len: Length of match in characters (if found)
+
+        If query not found, only "query" field is present.
+    """
+    # Step 1: Build text index by traversing XML tree
+    # Collect (xpath, text, start_pos, end_pos) for each text block
+    text_blocks = []
+    current_global_pos = 0
+
+    # Walk tree in document order
+    for elem in root.iter():
+        if not is_text_block_element(elem):
+            continue
+
+        # Extract text using itertext() (same as converter)
+        raw_text = ''.join(elem.itertext())
+        normalized = normalize_text(raw_text, case_sensitive)
+
+        if not normalized:
+            continue
+
+        xpath = get_element_xpath(elem, root)
+        text_len = len(normalized)
+
+        text_blocks.append({
+            'xpath': xpath,
+            'text': normalized,
+            'start_pos': current_global_pos,
+            'end_pos': current_global_pos + text_len,
+        })
+
+        # +1 for space between blocks (mimics markdown paragraph spacing)
+        current_global_pos += text_len + 1
+
+    # Step 2: Build full searchable text by joining blocks with spaces
+    full_text = ' '.join(block['text'] for block in text_blocks)
+
+    # Step 3: Search for each query
+    results = []
+
+    for query in queries:
+        normalized_query = normalize_text(query, case_sensitive)
+
+        # Skip empty queries
+        if not normalized_query:
+            results.append({'query': query})
+            continue
+
+        # Find first occurrence
+        match_start = full_text.find(normalized_query)
+
+        if match_start == -1:
+            # Not found
+            results.append({'query': query})
+            continue
+
+        match_end = match_start + len(normalized_query)
+
+        # Step 4: Map global positions back to (xpath, char_offset)
+        start_xpath = None
+        start_offset = None
+        stop_xpath = None
+        stop_offset = None
+
+        for block in text_blocks:
+            # Check if match starts in this block
+            if start_xpath is None:
+                if block['start_pos'] <= match_start < block['end_pos']:
+                    start_xpath = block['xpath']
+                    start_offset = match_start - block['start_pos']
+
+            # Check if match ends in this block
+            if block['start_pos'] < match_end <= block['end_pos']:
+                stop_xpath = block['xpath']
+                stop_offset = match_end - block['start_pos']
+                break
+
+            # Handle case where match ends exactly at block boundary
+            # (between two blocks, in the space)
+            if block['end_pos'] == match_end:
+                stop_xpath = block['xpath']
+                stop_offset = len(block['text'])
+                break
+
+        # Build result
+        if start_xpath and stop_xpath:
+            results.append({
+                'query': query,
+                'start': {'xpath': start_xpath, 'char_offset': start_offset},
+                'stop': {'xpath': stop_xpath, 'char_offset': stop_offset},
+                'len': len(normalized_query)
+            })
+        else:
+            # Edge case: match found but couldn't map (shouldn't happen)
+            results.append({'query': query})
+
+    return results
