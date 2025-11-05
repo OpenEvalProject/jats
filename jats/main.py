@@ -409,6 +409,120 @@ def run_find(parser: ArgumentParser, args: Namespace) -> None:
         print(json_output)
 
 
+def setup_text_args(subparsers) -> ArgumentParser:
+    """Setup the text command arguments."""
+    subparser = subparsers.add_parser(
+        "text",
+        description=(
+            "Extract plain text from JATS XML (matches jats find output).\\n\\n"
+            "This command extracts pure text using itertext(), producing output\\n"
+            "that is guaranteed to match what 'jats find' searches against.\\n"
+            "Use this for claim extraction, validation, and text matching.\\n\\n"
+            "Examples:\\n"
+            "  jats text paper.xml\\n"
+            "  jats text paper.xml -o paper.txt\\n"
+            "  jats text paper.xml --section abstract\\n"
+        ),
+        help="Extract plain text (matches jats find)",
+        formatter_class=RawTextHelpFormatter,
+    )
+
+    subparser.add_argument("xml", type=Path, help="JATS XML file to extract text from")
+
+    subparser.add_argument(
+        "-o",
+        "--output",
+        metavar="OUT",
+        type=Path,
+        help="Output text file (default: stdout)",
+        default=None,
+    )
+
+    subparser.add_argument(
+        "--section",
+        choices=["all", "abstract", "body"],
+        default="all",
+        help="Which section to extract (default: all)",
+    )
+
+    return subparser
+
+
+def validate_text_args(parser: ArgumentParser, args: Namespace) -> None:
+    """Validate text command arguments."""
+    if not args.xml.exists():
+        parser.error(f"Input file does not exist: {args.xml}")
+
+    if not args.xml.suffix.lower() in [".xml", ".jats"]:
+        parser.error(f"Input file must be XML: {args.xml}")
+
+    if args.output and args.output.exists() and not args.output.is_file():
+        parser.error(f"Output path exists but is not a file: {args.output}")
+
+
+def run_text(parser: ArgumentParser, args: Namespace) -> None:
+    """Run the text command."""
+    validate_text_args(parser, args)
+
+    # Parse XML
+    tree = etree.parse(str(args.xml))
+    root = tree.getroot()
+
+    # Extract text based on section
+    text_parts = []
+
+    if args.section in ["all", "abstract"]:
+        # Extract abstract
+        abstract = root.find('.//abstract')
+        if abstract is not None:
+            # Remove DOI elements before extracting text
+            for obj_id in abstract.findall('.//object-id[@pub-id-type="doi"]'):
+                parent = obj_id.getparent()
+                if parent is not None:
+                    parent.remove(obj_id)
+            for para in abstract.findall('.//p'):
+                bold_elem = para.find('bold')
+                if bold_elem is not None and bold_elem.text and 'DOI' in bold_elem.text:
+                    parent = para.getparent()
+                    if parent is not None:
+                        parent.remove(para)
+
+            abstract_text = ' '.join(abstract.itertext()).strip()
+            if abstract_text:
+                text_parts.append(abstract_text)
+
+    if args.section in ["all", "body"]:
+        # Extract body
+        body = root.find('.//body')
+        if body is not None:
+            # Remove DOI elements before extracting text
+            for obj_id in body.findall('.//object-id[@pub-id-type="doi"]'):
+                parent = obj_id.getparent()
+                if parent is not None:
+                    parent.remove(obj_id)
+            # Remove paragraphs with DOI text
+            for para in body.findall('.//p'):
+                bold_elem = para.find('bold')
+                if bold_elem is not None and bold_elem.text and 'DOI' in bold_elem.text:
+                    parent = para.getparent()
+                    if parent is not None:
+                        parent.remove(para)
+
+            body_text = ' '.join(body.itertext()).strip()
+            if body_text:
+                text_parts.append(body_text)
+
+    # Join with double newline (paragraph spacing)
+    full_text = '\n\n'.join(text_parts)
+
+    # Output
+    if args.output:
+        args.output.write_text(full_text, encoding='utf-8')
+        print(f"Extracted text from {args.xml} -> {args.output}", file=sys.stderr)
+    else:
+        print(full_text)
+
+
 def setup_parser():
     """Create and configure the main argument parser."""
     parser = ArgumentParser(
@@ -422,6 +536,7 @@ def setup_parser():
         "metadata": setup_metadata_args(subparsers),
         "convert": setup_convert_args(subparsers),
         "find": setup_find_args(subparsers),
+        "text": setup_text_args(subparsers),
     }
 
     return parser, command_to_parser
@@ -441,6 +556,7 @@ def main() -> None:
         "metadata": run_metadata,
         "convert": run_convert,
         "find": run_find,
+        "text": run_text,
     }
 
     if args.command in command_map:

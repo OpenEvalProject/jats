@@ -220,6 +220,140 @@ def parse_abstract(root: etree.Element) -> str:
     return ''.join(abstract.itertext()).strip()
 
 
+def mathml_to_latex(elem: etree.Element) -> str:
+    """Convert MathML element to LaTeX string.
+
+    Handles common MathML elements for inline and display math formulas.
+
+    Args:
+        elem: MathML element (typically <mml:math>)
+
+    Returns:
+        LaTeX representation of the formula
+    """
+    # Get tag name without namespace
+    tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+
+    # Text content (for mi, mn, mo elements)
+    if tag in ['mi', 'mn', 'mo', 'mtext']:
+        text = elem.text or ''
+        # Handle special characters
+        if tag == 'mo':
+            # Common operators
+            replacements = {
+                '≠': '\\neq',
+                '≤': '\\leq',
+                '≥': '\\geq',
+                '∈': '\\in',
+                '∞': '\\infty',
+                '×': '\\times',
+                '÷': '\\div',
+                '±': '\\pm',
+                '∓': '\\mp',
+                '∂': '\\partial',
+                '∫': '\\int',
+                '∑': '\\sum',
+                '∏': '\\prod',
+                '√': '\\sqrt',
+                '∇': '\\nabla',
+                '∆': '\\Delta',
+                'α': '\\alpha',
+                'β': '\\beta',
+                'γ': '\\gamma',
+                'δ': '\\delta',
+                'ε': '\\epsilon',
+                'θ': '\\theta',
+                'λ': '\\lambda',
+                'μ': '\\mu',
+                'π': '\\pi',
+                'σ': '\\sigma',
+                'τ': '\\tau',
+                'φ': '\\phi',
+                'ω': '\\omega',
+            }
+            return replacements.get(text, text)
+        elif tag == 'mi':
+            # Greek letters in variable names
+            greek = {
+                'α': '\\alpha', 'β': '\\beta', 'γ': '\\gamma', 'δ': '\\delta',
+                'ε': '\\epsilon', 'θ': '\\theta', 'λ': '\\lambda', 'μ': '\\mu',
+                'π': '\\pi', 'σ': '\\sigma', 'τ': '\\tau', 'φ': '\\phi', 'ω': '\\omega',
+            }
+            return greek.get(text, text)
+        return text
+
+    # Row/grouping
+    if tag == 'mrow':
+        parts = []
+        for child in elem:
+            parts.append(mathml_to_latex(child))
+        return ''.join(parts)
+
+    # Subscript
+    if tag == 'msub':
+        children = list(elem)
+        if len(children) >= 2:
+            base = mathml_to_latex(children[0])
+            sub = mathml_to_latex(children[1])
+            return f'{base}_{{{sub}}}'
+        return ''
+
+    # Superscript
+    if tag == 'msup':
+        children = list(elem)
+        if len(children) >= 2:
+            base = mathml_to_latex(children[0])
+            sup = mathml_to_latex(children[1])
+            return f'{base}^{{{sup}}}'
+        return ''
+
+    # Subscript and superscript
+    if tag == 'msubsup':
+        children = list(elem)
+        if len(children) >= 3:
+            base = mathml_to_latex(children[0])
+            sub = mathml_to_latex(children[1])
+            sup = mathml_to_latex(children[2])
+            return f'{base}_{{{sub}}}^{{{sup}}}'
+        return ''
+
+    # Fraction
+    if tag == 'mfrac':
+        children = list(elem)
+        if len(children) >= 2:
+            num = mathml_to_latex(children[0])
+            den = mathml_to_latex(children[1])
+            return f'\\frac{{{num}}}{{{den}}}'
+        return ''
+
+    # Square root
+    if tag == 'msqrt':
+        content = ''.join(mathml_to_latex(child) for child in elem)
+        return f'\\sqrt{{{content}}}'
+
+    # Root with index
+    if tag == 'mroot':
+        children = list(elem)
+        if len(children) >= 2:
+            base = mathml_to_latex(children[0])
+            index = mathml_to_latex(children[1])
+            return f'\\sqrt[{index}]{{{base}}}'
+        return ''
+
+    # Math element (root)
+    if tag == 'math':
+        parts = []
+        for child in elem:
+            parts.append(mathml_to_latex(child))
+        return ''.join(parts)
+
+    # Default: recursively process children
+    parts = []
+    for child in elem:
+        parts.append(mathml_to_latex(child))
+    return ''.join(parts)
+
+
 def parse_doi(root: etree.Element) -> str:
     """Extract DOI from article metadata."""
     doi_elem = root.find('.//article-id[@pub-id-type="doi"]')
@@ -644,6 +778,39 @@ def extract_text_with_citations(
                     # No URL available, keep plain text
                     parts.append(figure_text)
 
+        # Handle inline formulas
+        elif child.tag == 'inline-formula':
+            # Find the math element (check both with and without namespace)
+            math_elem = child.find('.//{http://www.w3.org/1998/Math/MathML}math')
+            if math_elem is None:
+                # Try without namespace prefix
+                math_elem = child.find('.//math')
+
+            if math_elem is not None:
+                # Convert MathML to LaTeX
+                latex = mathml_to_latex(math_elem)
+                # Wrap in inline math delimiters
+                parts.append(f'${latex}$')
+            else:
+                # Fallback to plain text
+                parts.append(''.join(child.itertext()))
+
+        # Handle display formulas (embedded in paragraphs)
+        elif child.tag == 'disp-formula':
+            # Find the math element
+            math_elem = child.find('.//{http://www.w3.org/1998/Math/MathML}math')
+            if math_elem is None:
+                math_elem = child.find('.//math')
+
+            if math_elem is not None:
+                # Convert MathML to LaTeX
+                latex = mathml_to_latex(math_elem)
+                # Display formulas get their own line with $$...$$
+                parts.append(f'\n\n$$\n{latex}\n$$\n\n')
+            else:
+                # Fallback to plain text
+                parts.append(''.join(child.itertext()))
+
         else:
             # Recursively extract text from other elements
             parts.append(extract_text_with_citations(child, references, figure_urls, no_refs))
@@ -811,6 +978,17 @@ def parse_body(
                 if table_id and table_id in tables:
                     section.content_items.append(
                         ContentItem(item_type='table', table=tables[table_id])
+                    )
+
+            elif child.tag == 'disp-formula':
+                # Display formula as direct child of section
+                math_elem = child.find('.//{http://www.w3.org/1998/Math/MathML}math')
+                if math_elem is not None:
+                    latex = mathml_to_latex(math_elem)
+                    # Display formulas get their own paragraph with $$...$$
+                    formula_text = f'$$\n{latex}\n$$'
+                    section.content_items.append(
+                        ContentItem(item_type='paragraph', text=formula_text)
                     )
 
             elif child.tag == 'sec':
