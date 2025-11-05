@@ -32,12 +32,34 @@ class Figure:
 
 
 @dataclass
-class ContentItem:
-    """Content item in a section (paragraph or figure)."""
+class TableCell:
+    """Table cell with content and attributes."""
 
-    item_type: str  # 'paragraph' or 'figure'
+    content: str
+    rowspan: Optional[int] = None
+    colspan: Optional[int] = None
+
+
+@dataclass
+class Table:
+    """Table with caption and data."""
+
+    table_id: str
+    label: Optional[str] = None
+    caption: Optional[str] = None
+    headers: List[List[TableCell]] = field(default_factory=list)  # List of header rows
+    rows: List[List[TableCell]] = field(default_factory=list)  # List of data rows
+    footer: Optional[str] = None
+
+
+@dataclass
+class ContentItem:
+    """Content item in a section (paragraph, figure, or table)."""
+
+    item_type: str  # 'paragraph', 'figure', or 'table'
     text: Optional[str] = None  # For paragraphs
     figure: Optional[Figure] = None  # For figures
+    table: Optional['Table'] = None  # For tables
 
 
 @dataclass

@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 from lxml import etree
 
-from .models import Article, Author, ContentItem, Figure, Reviewer, Section, SubArticle
+from .models import Article, Author, ContentItem, Figure, Reviewer, Section, SubArticle, Table, TableCell
 
 
 def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Optional[str]]]:
@@ -200,6 +200,21 @@ def parse_abstract(root: etree.Element) -> str:
     if abstract is None:
         return ""
 
+    # Remove DOI elements (eLife style)
+    # Remove <object-id pub-id-type="doi"> elements
+    for obj_id in abstract.findall('.//object-id[@pub-id-type="doi"]'):
+        parent = obj_id.getparent()
+        if parent is not None:
+            parent.remove(obj_id)
+
+    # Remove <p><bold>DOI:</bold> <ext-link>...</ext-link></p> paragraphs
+    for para in abstract.findall('.//p'):
+        bold_elem = para.find('bold')
+        if bold_elem is not None and bold_elem.text and 'DOI' in bold_elem.text:
+            parent = para.getparent()
+            if parent is not None:
+                parent.remove(para)
+
     # Use itertext() for consistency with find and body paragraph extraction
     # This ensures queries extracted from markdown can be found in XML
     return ''.join(abstract.itertext()).strip()
@@ -351,9 +366,16 @@ def build_figure_urls(
 
 
 def parse_figures(
-    root: etree.Element, figure_map: Optional[Dict[str, str]] = None
+    root: etree.Element,
+    figure_map: Optional[Dict[str, str]] = None,
+    no_refs: bool = False
 ) -> Dict[str, Figure]:
     """Parse figures from JATS XML.
+
+    Args:
+        root: Root XML element
+        figure_map: Optional mapping of figure IDs to file paths
+        no_refs: If True, strip URL links from references
 
     Returns:
         Dictionary mapping figure IDs to Figure objects
@@ -382,16 +404,37 @@ def parse_figures(
                 if parent is not None:
                     parent.remove(supp_mat)
 
-            caption_parts = []
-            for elem in caption_elem.iter():
-                # Skip title elements
-                if elem.tag == 'title':
-                    continue
-                if elem.text:
-                    caption_parts.append(elem.text)
-                if elem.tail:
-                    caption_parts.append(elem.tail)
-            caption_text = ''.join(caption_parts).strip()
+            # Remove DOI elements (eLife style)
+            # Remove <object-id pub-id-type="doi"> elements
+            for obj_id in caption_elem.findall('.//object-id[@pub-id-type="doi"]'):
+                parent = obj_id.getparent()
+                if parent is not None:
+                    parent.remove(obj_id)
+
+            # Remove <p><bold>DOI:</bold> <ext-link>...</ext-link></p> paragraphs
+            for para in caption_elem.findall('.//p'):
+                bold_elem = para.find('bold')
+                if bold_elem is not None and bold_elem.text and 'DOI' in bold_elem.text:
+                    parent = para.getparent()
+                    if parent is not None:
+                        parent.remove(para)
+
+            # Use extract_text_with_citations to properly handle inline elements
+            # (superscripts, subscripts, italics, etc.)
+            caption_text = extract_text_with_citations(caption_elem, no_refs=no_refs)
+
+            # Remove title text if present (title is handled separately via label)
+            title_elem = caption_elem.find('title')
+            if title_elem is not None:
+                title_text = ''.join(title_elem.itertext()).strip()
+                if title_text and caption_text.startswith(title_text):
+                    # Remove title and any following whitespace/punctuation
+                    caption_text = caption_text[len(title_text):].strip()
+                    # Remove leading period/colon if present
+                    if caption_text and caption_text[0] in '.:-':
+                        caption_text = caption_text[1:].strip()
+
+            caption_text = caption_text.strip()
             if caption_text:
                 caption = caption_text
 
@@ -419,10 +462,128 @@ def parse_figures(
     return figures
 
 
+def parse_tables(root: etree.Element, no_refs: bool = False) -> Dict[str, Table]:
+    """Parse tables from JATS XML.
+
+    Args:
+        root: Root XML element
+        no_refs: If True, strip URL links from references
+
+    Returns:
+        Dictionary mapping table IDs to Table objects
+    """
+    tables = {}
+
+    for table_wrap in root.findall('.//table-wrap'):
+        table_id = table_wrap.get('id')
+        if not table_id:
+            continue
+
+        # Get label
+        label = None
+        label_elem = table_wrap.find('label')
+        if label_elem is not None and label_elem.text:
+            label = label_elem.text.strip()
+
+        # Get caption
+        caption = None
+        caption_elem = table_wrap.find('caption')
+        if caption_elem is not None:
+            # Remove DOI elements (eLife style)
+            # Remove <object-id pub-id-type="doi"> elements
+            for obj_id in caption_elem.findall('.//object-id[@pub-id-type="doi"]'):
+                parent = obj_id.getparent()
+                if parent is not None:
+                    parent.remove(obj_id)
+
+            # Remove <p><bold>DOI:</bold> <ext-link>...</ext-link></p> paragraphs
+            for para in caption_elem.findall('.//p'):
+                bold_elem = para.find('bold')
+                if bold_elem is not None and bold_elem.text and 'DOI' in bold_elem.text:
+                    parent = para.getparent()
+                    if parent is not None:
+                        parent.remove(para)
+
+            # Extract caption text
+            caption_text = extract_text_with_citations(caption_elem, no_refs=no_refs)
+            caption = caption_text.strip() if caption_text else None
+
+        # Parse table element
+        table_elem = table_wrap.find('table')
+        headers = []
+        rows = []
+
+        if table_elem is not None:
+            # Parse header rows
+            thead = table_elem.find('thead')
+            if thead is not None:
+                for tr in thead.findall('tr'):
+                    header_row = []
+                    for cell in tr.findall('td') + tr.findall('th'):
+                        cell_text = ''.join(cell.itertext()).strip()
+
+                        # Extract rowspan and colspan attributes
+                        rowspan = cell.get('rowspan')
+                        colspan = cell.get('colspan')
+
+                        rowspan_int = int(rowspan) if rowspan else None
+                        colspan_int = int(colspan) if colspan else None
+
+                        header_row.append(TableCell(
+                            content=cell_text,
+                            rowspan=rowspan_int,
+                            colspan=colspan_int
+                        ))
+                    if header_row:
+                        headers.append(header_row)
+
+            # Parse body rows
+            tbody = table_elem.find('tbody')
+            if tbody is not None:
+                for tr in tbody.findall('tr'):
+                    row = []
+                    for cell in tr.findall('td') + tr.findall('th'):
+                        cell_text = ''.join(cell.itertext()).strip()
+
+                        # Extract rowspan and colspan attributes
+                        rowspan = cell.get('rowspan')
+                        colspan = cell.get('colspan')
+
+                        rowspan_int = int(rowspan) if rowspan else None
+                        colspan_int = int(colspan) if colspan else None
+
+                        row.append(TableCell(
+                            content=cell_text,
+                            rowspan=rowspan_int,
+                            colspan=colspan_int
+                        ))
+                    if row:
+                        rows.append(row)
+
+        # Get footer
+        footer = None
+        footer_elem = table_wrap.find('table-wrap-foot')
+        if footer_elem is not None:
+            footer_text = ''.join(footer_elem.itertext()).strip()
+            footer = footer_text if footer_text else None
+
+        tables[table_id] = Table(
+            table_id=table_id,
+            label=label,
+            caption=caption,
+            headers=headers,
+            rows=rows,
+            footer=footer,
+        )
+
+    return tables
+
+
 def extract_text_with_citations(
     elem: etree.Element,
     references: Optional[Dict[str, str]] = None,
-    figure_urls: Optional[Dict[str, str]] = None
+    figure_urls: Optional[Dict[str, str]] = None,
+    no_refs: bool = False
 ) -> str:
     """Extract text from element, converting citation and figure xrefs to markdown links.
 
@@ -430,9 +591,11 @@ def extract_text_with_citations(
         elem: XML element to extract text from
         references: Dictionary mapping ref-ids to DOIs
         figure_urls: Dictionary mapping figure-ids to image URLs
+        no_refs: If True, strip URL links and keep only citation text (e.g., "Author, Year")
 
     Returns:
-        Text with citations and figure references converted to markdown links
+        Text with citations and figure references converted to markdown links,
+        or plain text if no_refs=True
     """
     if references is None:
         references = {}
@@ -452,30 +615,38 @@ def extract_text_with_citations(
             ref_id = child.get('rid')
             citation_text = ''.join(child.itertext()).strip()
 
-            # Convert to markdown link if DOI is available
-            if ref_id and ref_id in references:
-                doi = references[ref_id]
-                parts.append(f"[{citation_text}](https://doi.org/{doi})")
-            else:
-                # No DOI available, keep plain text
+            if no_refs:
+                # Just output plain citation text
                 parts.append(citation_text)
+            else:
+                # Convert to markdown link if DOI is available
+                if ref_id and ref_id in references:
+                    doi = references[ref_id]
+                    parts.append(f"[{citation_text}](https://doi.org/{doi})")
+                else:
+                    # No DOI available, keep plain text
+                    parts.append(citation_text)
 
         # Handle figure xrefs
         elif child.tag == 'xref' and child.get('ref-type') == 'fig':
             fig_id = child.get('rid')
             figure_text = ''.join(child.itertext()).strip()
 
-            # Convert to markdown link if figure URL is available
-            if fig_id and fig_id in figure_urls:
-                fig_url = figure_urls[fig_id]
-                parts.append(f"[{figure_text}]({fig_url})")
-            else:
-                # No URL available, keep plain text
+            if no_refs:
+                # Just output plain figure text
                 parts.append(figure_text)
+            else:
+                # Convert to markdown link if figure URL is available
+                if fig_id and fig_id in figure_urls:
+                    fig_url = figure_urls[fig_id]
+                    parts.append(f"[{figure_text}]({fig_url})")
+                else:
+                    # No URL available, keep plain text
+                    parts.append(figure_text)
 
         else:
             # Recursively extract text from other elements
-            parts.append(extract_text_with_citations(child, references, figure_urls))
+            parts.append(extract_text_with_citations(child, references, figure_urls, no_refs))
 
         # Add tail text after child
         if child.tail:
@@ -487,16 +658,28 @@ def extract_text_with_citations(
 def parse_body(
     root: etree.Element,
     figures: Optional[Dict[str, Figure]] = None,
+    tables: Optional[Dict[str, Table]] = None,
     references: Optional[Dict[str, str]] = None,
-    figure_urls: Optional[Dict[str, str]] = None
+    figure_urls: Optional[Dict[str, str]] = None,
+    no_refs: bool = False
 ) -> List[Section]:
     """Parse article body sections.
+
+    Args:
+        root: Root XML element
+        figures: Dictionary of Figure objects
+        tables: Dictionary of Table objects
+        references: Dictionary mapping ref-ids to DOIs
+        figure_urls: Dictionary mapping figure-ids to image URLs
+        no_refs: If True, strip URL links from references
 
     Returns:
         List of Section objects
     """
     if figures is None:
         figures = {}
+    if tables is None:
+        tables = {}
     if figure_urls is None:
         figure_urls = {}
 
@@ -517,36 +700,89 @@ def parse_body(
         # Get section content (paragraphs and figures in order)
         for child in sec:
             if child.tag == 'p':
-                # Check if paragraph contains embedded figures (eLife style)
+                # Check if paragraph contains embedded figures or tables (eLife style)
                 embedded_figs = child.findall('.//fig')
+                embedded_tables = child.findall('.//table-wrap')
 
-                if embedded_figs:
-                    # Paragraph has embedded figures
-                    if child.text:
-                        para_text = child.text.strip()
-                        if para_text:
-                            section.content_items.append(
-                                ContentItem(item_type='paragraph', text=para_text)
-                            )
+                if embedded_figs or embedded_tables:
+                    # Paragraph has embedded figures - need to handle text chunks between figures
+                    # properly extracting inline elements like <italic>, <bold>, citations, etc.
+                    current_text_parts = []
 
-                    # Process each embedded figure
-                    for fig in embedded_figs:
-                        fig_id = fig.get('id')
-                        if fig_id and fig_id in figures:
-                            section.content_items.append(
-                                ContentItem(
-                                    item_type='figure', figure=figures[fig_id]
+                    def add_accumulated_text():
+                        """Helper to add accumulated text as paragraph item."""
+                        if current_text_parts:
+                            accumulated = ''.join(current_text_parts).strip()
+                            if accumulated:
+                                section.content_items.append(
+                                    ContentItem(item_type='paragraph', text=accumulated)
                                 )
-                            )
+                            current_text_parts.clear()
 
-                        if fig.tail and fig.tail.strip():
-                            section.content_items.append(
-                                ContentItem(item_type='paragraph', text=fig.tail.strip())
-                            )
+                    # Add initial text before any child elements
+                    if child.text:
+                        current_text_parts.append(child.text)
+
+                    # Process each child element
+                    for elem in child:
+                        if elem.tag == 'fig':
+                            # Save accumulated text before figure
+                            add_accumulated_text()
+
+                            # Add figure
+                            fig_id = elem.get('id')
+                            if fig_id and fig_id in figures:
+                                section.content_items.append(
+                                    ContentItem(item_type='figure', figure=figures[fig_id])
+                                )
+
+                            # Add text after figure (tail)
+                            if elem.tail:
+                                current_text_parts.append(elem.tail)
+                        elif elem.tag == 'fig-group':
+                            # Save accumulated text before figure group
+                            add_accumulated_text()
+
+                            # Add all figures in the group
+                            for fig in elem.findall('.//fig'):
+                                fig_id = fig.get('id')
+                                if fig_id and fig_id in figures:
+                                    section.content_items.append(
+                                        ContentItem(item_type='figure', figure=figures[fig_id])
+                                    )
+
+                            # Add text after figure group (tail)
+                            if elem.tail:
+                                current_text_parts.append(elem.tail)
+                        elif elem.tag == 'table-wrap':
+                            # Save accumulated text before table
+                            add_accumulated_text()
+
+                            # Add table
+                            table_id = elem.get('id')
+                            if table_id and table_id in tables:
+                                section.content_items.append(
+                                    ContentItem(item_type='table', table=tables[table_id])
+                                )
+
+                            # Add text after table (tail)
+                            if elem.tail:
+                                current_text_parts.append(elem.tail)
+                        else:
+                            # Not a figure - extract text including inline formatting
+                            elem_text = extract_text_with_citations(elem, references, figure_urls, no_refs)
+                            current_text_parts.append(elem_text)
+
+                            # Add tail text (text after this element, before next sibling)
+                            if elem.tail:
+                                current_text_parts.append(elem.tail)
+
+                    # Add any remaining accumulated text
+                    add_accumulated_text()
                 else:
                     # Normal paragraph without embedded figures
                     # Extract text with citation and figure links
-                    para_text = extract_text_with_citations(child, references, figure_urls).strip()
+                    para_text = extract_text_with_citations(child, references, figure_urls, no_refs).strip()
                     if para_text:
                         section.content_items.append(
                             ContentItem(item_type='paragraph', text=para_text)
@@ -568,6 +804,14 @@ def parse_body(
                         section.content_items.append(
                             ContentItem(item_type='figure', figure=figures[fig_id])
                         )
+
+            elif child.tag == 'table-wrap':
+                # Table as direct child of section
+                table_id = child.get('id')
+                if table_id and table_id in tables:
+                    section.content_items.append(
+                        ContentItem(item_type='table', table=tables[table_id])
+                    )
 
             elif child.tag == 'sec':
                 # Nested section - skip for now
@@ -747,12 +991,17 @@ def parse_sub_articles(
     return sub_articles
 
 
-def parse_jats_xml(xml_path: Path, manifest_path: Optional[Path] = None) -> Article:
+def parse_jats_xml(
+    xml_path: Path,
+    manifest_path: Optional[Path] = None,
+    no_refs: bool = False
+) -> Article:
     """Parse JATS XML file and return Article object.
 
     Args:
         xml_path: Path to XML file
         manifest_path: Optional path to manifest.xml
+        no_refs: If True, strip URL links from references
 
     Returns:
         Article object
@@ -792,9 +1041,10 @@ def parse_jats_xml(xml_path: Path, manifest_path: Optional[Path] = None) -> Arti
     affiliations_detailed = parse_affiliations_detailed(root)
     references = parse_references(root)
     abstract = parse_abstract(root)
-    figures = parse_figures(root, figure_map)
+    figures = parse_figures(root, figure_map, no_refs)
+    tables = parse_tables(root, no_refs)
     figure_urls = build_figure_urls(figures, article_id, is_elife)
-    body = parse_body(root, figures, references, figure_urls)
+    body = parse_body(root, figures, tables, references, figure_urls, no_refs)
     sub_articles = parse_sub_articles(root, figures)
 
     return Article(
@@ -930,6 +1180,35 @@ def is_text_block_element(element: etree.Element) -> bool:
     return element.tag in text_block_tags
 
 
+def get_longest_segment(query: str, min_length: int = 10) -> Optional[str]:
+    """Extract longest text segment from a query containing ellipsis.
+
+    When LLMs paraphrase text with ellipsis ("..."), they typically preserve
+    one or more substantial segments of the original text. This function extracts
+    the longest segment, which is most likely to be found in the source document.
+
+    Args:
+        query: Query string potentially containing ellipsis
+        min_length: Minimum length for a segment to be considered (default: 10 chars)
+
+    Returns:
+        Longest segment if query contains ellipsis and has valid segments,
+        None otherwise
+    """
+    if "..." not in query:
+        return None
+
+    # Split by ellipsis and filter segments
+    segments = query.split("...")
+    segments = [s.strip() for s in segments if len(s.strip()) >= min_length]
+
+    if not segments:
+        return None
+
+    # Return longest segment
+    return max(segments, key=len)
+
+
 def find_text_locations(
     root: etree.Element,
     queries: List[str],
@@ -940,6 +1219,10 @@ def find_text_locations(
     Builds a normalized text representation of the document and finds exact
     matches, returning precise XML-anchored locations.
 
+    For queries containing ellipsis ("...") that don't match exactly, automatically
+    tries to match the longest text segment as a fallback. This handles cases where
+    LLMs paraphrase text by omitting portions.
+
     Args:
         root: Root element of JATS XML document
         queries: List of query strings to find
@@ -947,12 +1230,17 @@ def find_text_locations(
 
     Returns:
         List of match dictionaries, one per query. Each dict contains:
-        - query: The query string
+        - query: The original query string
         - start: {"xpath": str, "char_offset": int} (if found)
         - stop: {"xpath": str, "char_offset": int} (if found)
         - len: Length of match in characters (if found)
+        - matched_segment: The segment that was matched in the XML
+          * For exact matches: equals query
+          * For ellipsis fallback: the longest segment extracted from query
 
         If query not found, only "query" field is present.
+
+        To identify ellipsis fallback cases: check if matched_segment != query
     """
     # Step 1: Build text index by traversing XML tree
     # Collect (xpath, text, start_pos, end_pos) for each text block
@@ -1001,8 +1289,22 @@ def find_text_locations(
         # Find first occurrence
         match_start = full_text.find(normalized_query)
 
+        # Track what segment actually matched (query for exact match, or longest segment for ellipsis)
+        matched_segment = query  # Default: exact match
+
+        # If not found and query contains ellipsis, try longest segment fallback
+        if match_start == -1 and "..." in query:
+            longest_segment = get_longest_segment(query)
+            if longest_segment:
+                normalized_segment = normalize_text(longest_segment, case_sensitive)
+                match_start = full_text.find(normalized_segment)
+                if match_start != -1:
+                    # Found using longest segment
+                    matched_segment = longest_segment
+                    normalized_query = normalized_segment
+
         if match_start == -1:
-            # Not found
+            # Not found (even after ellipsis fallback if applicable)
             results.append({'query': query})
             continue
 
@@ -1036,12 +1338,14 @@ def find_text_locations(
 
         # Build result
         if start_xpath and stop_xpath:
-            results.append({
+            result = {
                 'query': query,
+                'matched_segment': matched_segment,
                 'start': {'xpath': start_xpath, 'char_offset': start_offset},
                 'stop': {'xpath': stop_xpath, 'char_offset': stop_offset},
                 'len': len(normalized_query)
-            })
+            }
+            results.append(result)
         else:
             # Edge case: match found but couldn't map (shouldn't happen)
             results.append({'query': query})

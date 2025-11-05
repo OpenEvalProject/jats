@@ -166,6 +166,13 @@ def setup_convert_args(subparsers) -> ArgumentParser:
         default=None,
     )
 
+    subparser.add_argument(
+        "--no-refs",
+        action="store_true",
+        help="Strip URL links from references (keep only citation text like 'Author, Year')",
+        default=False,
+    )
+
     return subparser
 
 
@@ -196,7 +203,7 @@ def run_convert(parser: ArgumentParser, args: Namespace) -> None:
     validate_convert_args(parser, args)
 
     # Parse JATS XML
-    article = parse_jats_xml(args.xml, manifest_path=args.manifest)
+    article = parse_jats_xml(args.xml, manifest_path=args.manifest, no_refs=args.no_refs)
 
     # Convert to markdown
     markdown = convert_to_markdown(article)

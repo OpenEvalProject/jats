@@ -2,7 +2,82 @@
 
 from typing import List
 
-from .models import Article, Figure, SubArticle
+from .models import Article, Figure, SubArticle, Table
+
+
+def format_table_markdown(table: Table) -> str:
+    """Format table as HTML (valid in markdown).
+
+    Args:
+        table: Table object
+
+    Returns:
+        HTML table (valid markdown)
+    """
+    parts = []
+
+    # Add label and caption
+    if table.label:
+        parts.append(f"**{table.label}**")
+        if table.caption:
+            parts.append(f" {table.caption}")
+        parts.append("\n")
+    elif table.caption:
+        parts.append(f"{table.caption}\n")
+
+    # Build HTML table
+    if table.headers or table.rows:
+        parts.append("<table>")
+
+        # Add header rows
+        if table.headers:
+            parts.append("  <thead>")
+            for header_row in table.headers:
+                parts.append("    <tr>")
+                for cell in header_row:
+                    # Escape HTML entities in cell content
+                    escaped_content = cell.content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                    # Build attributes string
+                    attrs = []
+                    if cell.rowspan and cell.rowspan > 1:
+                        attrs.append(f'rowspan="{cell.rowspan}"')
+                    if cell.colspan and cell.colspan > 1:
+                        attrs.append(f'colspan="{cell.colspan}"')
+
+                    attrs_str = ' ' + ' '.join(attrs) if attrs else ''
+                    parts.append(f"      <th{attrs_str}>{escaped_content}</th>")
+                parts.append("    </tr>")
+            parts.append("  </thead>")
+
+        # Add body rows
+        if table.rows:
+            parts.append("  <tbody>")
+            for row in table.rows:
+                parts.append("    <tr>")
+                for cell in row:
+                    # Escape HTML entities in cell content
+                    escaped_content = cell.content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                    # Build attributes string
+                    attrs = []
+                    if cell.rowspan and cell.rowspan > 1:
+                        attrs.append(f'rowspan="{cell.rowspan}"')
+                    if cell.colspan and cell.colspan > 1:
+                        attrs.append(f'colspan="{cell.colspan}"')
+
+                    attrs_str = ' ' + ' '.join(attrs) if attrs else ''
+                    parts.append(f"      <td{attrs_str}>{escaped_content}</td>")
+                parts.append("    </tr>")
+            parts.append("  </tbody>")
+
+        parts.append("</table>\n")
+
+    # Add footer if present
+    if table.footer:
+        parts.append(f"_{table.footer}_\n")
+
+    return '\n'.join(parts)
 
 
 def format_figure_markdown(figure: Figure, article_id: str = None, is_elife: bool = False) -> str:
@@ -120,7 +195,7 @@ def convert_to_markdown(article: Article) -> str:
         if section.title:
             md_parts.append(f"## {section.title}\n")
 
-        # Render content items (paragraphs and figures in order)
+        # Render content items (paragraphs, figures, and tables in order)
         for item in section.content_items:
             if item.item_type == 'paragraph' and item.text:
                 md_parts.append(item.text + "\n")
@@ -130,6 +205,8 @@ def convert_to_markdown(article: Article) -> str:
                         item.figure, article.article_id, article.is_elife
                     )
                 )
+            elif item.item_type == 'table' and item.table:
+                md_parts.append(format_table_markdown(item.table))
 
     return '\n'.join(md_parts)
 
