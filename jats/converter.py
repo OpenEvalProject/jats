@@ -193,7 +193,9 @@ def convert_to_markdown(article: Article) -> str:
     # Body sections
     for section in article.body:
         if section.title:
-            md_parts.append(f"## {section.title}\n")
+            # Use section.level to generate correct heading (##, ###, ####, etc.)
+            heading_prefix = '#' * section.level
+            md_parts.append(f"{heading_prefix} {section.title}\n")
 
         # Render content items (paragraphs, figures, and tables in order)
         for item in section.content_items:

@@ -596,6 +596,96 @@ def parse_figures(
     return figures
 
 
+def parse_media(
+    root: etree.Element,
+    no_refs: bool = False
+) -> Dict[str, Figure]:
+    """Parse media elements (movies/videos) from JATS XML.
+
+    Media elements are treated as Figure objects for consistency with other
+    visual content in the article.
+
+    Args:
+        root: Root XML element
+        no_refs: If True, strip URL links from references
+
+    Returns:
+        Dictionary mapping media IDs to Figure objects
+    """
+    media_items = {}
+
+    for media in root.findall('.//media'):
+        media_id = media.get('id')
+        if not media_id:
+            continue
+
+        # Remove <object-id pub-id-type="doi"> elements BEFORE processing
+        # (these appear at the top level of media element, not just in caption)
+        for obj_id in media.findall('./object-id[@pub-id-type="doi"]'):
+            parent = obj_id.getparent()
+            if parent is not None:
+                parent.remove(obj_id)
+
+        # Get label
+        label = None
+        label_elem = media.find('label')
+        if label_elem is not None and label_elem.text:
+            label = label_elem.text.strip()
+
+        # Get caption
+        caption = None
+        caption_elem = media.find('.//caption')
+        if caption_elem is not None:
+            # Remove <object-id pub-id-type="doi"> elements from caption
+            for obj_id in caption_elem.findall('.//object-id[@pub-id-type="doi"]'):
+                parent = obj_id.getparent()
+                if parent is not None:
+                    parent.remove(obj_id)
+
+            # Remove <p><bold>DOI:</bold> <ext-link>...</ext-link></p> paragraphs
+            for para in caption_elem.findall('.//p'):
+                bold_elem = para.find('bold')
+                if bold_elem is not None and bold_elem.text and 'DOI' in bold_elem.text:
+                    parent = para.getparent()
+                    if parent is not None:
+                        parent.remove(para)
+
+            # Use extract_text_with_citations to properly handle inline elements
+            caption_text = extract_text_with_citations(caption_elem, no_refs=no_refs)
+
+            # Remove title text if present (title is handled separately via label)
+            title_elem = caption_elem.find('title')
+            if title_elem is not None:
+                title_text = ''.join(title_elem.itertext()).strip()
+                if title_text and caption_text.startswith(title_text):
+                    # Remove title and any following whitespace/punctuation
+                    caption_text = caption_text[len(title_text):].strip()
+                    # Remove leading period/colon if present
+                    if caption_text and caption_text[0] in '.:-':
+                        caption_text = caption_text[1:].strip()
+
+            caption_text = caption_text.strip()
+            if caption_text:
+                caption = caption_text
+
+        # Get media href (xlink:href attribute)
+        media_href = None
+        href = media.get('{http://www.w3.org/1999/xlink}href')
+        if href:
+            media_href = href
+
+        # Create Figure object to represent media
+        media_items[media_id] = Figure(
+            figure_id=media_id,
+            label=label,
+            caption=caption,
+            graphic_href=media_href,
+            file_path=None,
+        )
+
+    return media_items
+
+
 def parse_tables(root: etree.Element, no_refs: bool = False) -> Dict[str, Table]:
     """Parse tables from JATS XML.
 
@@ -856,7 +946,15 @@ def parse_body(
 
     sections = []
     for sec in body.findall('.//sec'):
-        section = Section()
+        # Calculate section level by counting parent <sec> elements
+        level = 2  # Start at h2 (## in markdown)
+        parent = sec.getparent()
+        while parent is not None:
+            if parent.tag == 'sec':
+                level += 1
+            parent = parent.getparent()
+
+        section = Section(level=level)
 
         # Get section title
         title_elem = sec.find('title')
@@ -869,9 +967,10 @@ def parse_body(
             if child.tag == 'p':
                 # Check if paragraph contains embedded figures or tables (eLife style)
                 embedded_figs = child.findall('.//fig')
+                embedded_media = child.findall('.//media')
                 embedded_tables = child.findall('.//table-wrap')
 
-                if embedded_figs or embedded_tables:
+                if embedded_figs or embedded_media or embedded_tables:
                     # Paragraph has embedded figures - need to handle text chunks between figures
                     # properly extracting inline elements like <italic>, <bold>, citations, etc.
                     current_text_parts = []
@@ -904,6 +1003,20 @@ def parse_body(
                                 )
 
                             # Add text after figure (tail)
+                            if elem.tail:
+                                current_text_parts.append(elem.tail)
+                        elif elem.tag == 'media':
+                            # Save accumulated text before media
+                            add_accumulated_text()
+
+                            # Add media (treated as figure)
+                            media_id = elem.get('id')
+                            if media_id and media_id in figures:
+                                section.content_items.append(
+                                    ContentItem(item_type='figure', figure=figures[media_id])
+                                )
+
+                            # Add text after media (tail)
                             if elem.tail:
                                 current_text_parts.append(elem.tail)
                         elif elem.tag == 'fig-group':
@@ -961,6 +1074,14 @@ def parse_body(
                 if fig_id and fig_id in figures:
                     section.content_items.append(
                         ContentItem(item_type='figure', figure=figures[fig_id])
+                    )
+
+            elif child.tag == 'media':
+                # Media as direct child of section
+                media_id = child.get('id')
+                if media_id and media_id in figures:
+                    section.content_items.append(
+                        ContentItem(item_type='figure', figure=figures[media_id])
                     )
 
             elif child.tag == 'fig-group':
@@ -1220,6 +1341,9 @@ def parse_jats_xml(
     references = parse_references(root)
     abstract = parse_abstract(root)
     figures = parse_figures(root, figure_map, no_refs)
+    media = parse_media(root, no_refs)
+    # Merge media into figures (media are treated as figures for display purposes)
+    figures.update(media)
     tables = parse_tables(root, no_refs)
     figure_urls = build_figure_urls(figures, article_id, is_elife)
     body = parse_body(root, figures, tables, references, figure_urls, no_refs)

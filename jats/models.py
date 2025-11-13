@@ -68,6 +68,7 @@ class Section:
 
     title: Optional[str] = None
     content_items: List[ContentItem] = field(default_factory=list)
+    level: int = 2  # Heading level (2=##, 3=###, etc.)
 
 
 @dataclass
