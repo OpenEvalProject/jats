@@ -523,6 +523,94 @@ def run_text(parser: ArgumentParser, args: Namespace) -> None:
         print(full_text)
 
 
+def setup_annotate_args(subparsers) -> ArgumentParser:
+    """Setup the annotate command arguments."""
+    subparser = subparsers.add_parser(
+        "annotate",
+        description=(
+            "Inject <named-content> tags for claims at precise XPath positions.\n\n"
+            "This command reads a JATS XML file and a pos_claims.json file with\n"
+            "precise XPath and character offset positions, then injects JATS-standard\n"
+            "<named-content> tags to mark the claim locations in the XML.\n\n"
+            "Examples:\n"
+            "  jats annotate paper.xml --claims pos_claims.json -o annotated.xml\n"
+        ),
+        help="Annotate JATS XML with claim positions",
+        formatter_class=RawTextHelpFormatter,
+    )
+
+    subparser.add_argument("xml", type=Path, help="JATS XML file to annotate")
+
+    subparser.add_argument(
+        "--claims",
+        type=Path,
+        required=True,
+        help="pos_claims.json file with XPath position data",
+    )
+
+    subparser.add_argument(
+        "-o",
+        "--output",
+        metavar="OUT",
+        type=Path,
+        required=True,
+        help="Output annotated XML file",
+    )
+
+    return subparser
+
+
+def validate_annotate_args(parser: ArgumentParser, args: Namespace) -> None:
+    """Validate annotate command arguments."""
+    if not args.xml.exists():
+        parser.error(f"Input XML file does not exist: {args.xml}")
+
+    if not args.xml.suffix.lower() in [".xml", ".jats"]:
+        parser.error(f"Input file must be XML: {args.xml}")
+
+    if not args.claims.exists():
+        parser.error(f"Claims file does not exist: {args.claims}")
+
+    if not args.claims.suffix.lower() == ".json":
+        parser.error(f"Claims file must be JSON: {args.claims}")
+
+    if args.output.exists():
+        parser.error(f"Output file already exists: {args.output}")
+
+
+def run_annotate(parser: ArgumentParser, args: Namespace) -> None:
+    """Run the annotate command."""
+    from .annotate import inject_named_content_tags
+
+    validate_annotate_args(parser, args)
+
+    # Inject named-content tags
+    try:
+        root, successful, failed = inject_named_content_tags(args.xml, args.claims)
+    except Exception as e:
+        print(f"Error annotating XML: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Write output
+    try:
+        tree = etree.ElementTree(root)
+        tree.write(
+            str(args.output),
+            encoding='utf-8',
+            xml_declaration=True,
+            pretty_print=True
+        )
+        print(
+            f"Annotated {args.xml} with {successful} claims -> {args.output}",
+            file=sys.stderr
+        )
+        if failed > 0:
+            print(f"Warning: {failed} claims failed to annotate", file=sys.stderr)
+    except Exception as e:
+        print(f"Error writing output: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def setup_parser():
     """Create and configure the main argument parser."""
     parser = ArgumentParser(
@@ -537,6 +625,7 @@ def setup_parser():
         "convert": setup_convert_args(subparsers),
         "find": setup_find_args(subparsers),
         "text": setup_text_args(subparsers),
+        "annotate": setup_annotate_args(subparsers),
     }
 
     return parser, command_to_parser
@@ -557,6 +646,7 @@ def main() -> None:
         "convert": run_convert,
         "find": run_find,
         "text": run_text,
+        "annotate": run_annotate,
     }
 
     if args.command in command_map:

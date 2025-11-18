@@ -901,6 +901,18 @@ def extract_text_with_citations(
                 # Fallback to plain text
                 parts.append(''.join(child.itertext()))
 
+        # Handle named-content elements (claim annotations)
+        elif child.tag == 'named-content' and child.get('content-type') == 'scientific-claim':
+            # Convert JATS <named-content> to HTML <mark> tag (preserved in markdown)
+            claim_id = child.get('id', '')
+            claim_ids = child.get('claim-ids', '')
+            claim_text = ''.join(child.itertext()).strip()
+            # Use mark tag with data attributes for frontend highlighting
+            if claim_ids:
+                parts.append(f'<mark data-claim-id="{claim_id}" data-claim-ids="{claim_ids}" class="claim-highlight">{claim_text}</mark>')
+            else:
+                parts.append(f'<mark data-claim-id="{claim_id}" class="claim-highlight">{claim_text}</mark>')
+
         else:
             # Recursively extract text from other elements
             parts.append(extract_text_with_citations(child, references, figure_urls, no_refs))
