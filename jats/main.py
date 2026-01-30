@@ -611,6 +611,105 @@ def run_annotate(parser: ArgumentParser, args: Namespace) -> None:
         sys.exit(1)
 
 
+def setup_elife_score_args(subparsers) -> ArgumentParser:
+    """Setup the elife-score command arguments."""
+    subparser = subparsers.add_parser(
+        "elife-score",
+        description=(
+            "Extract eLife assessment from JATS XML editor-report sub-article.\n\n"
+            "This command extracts assessment data from the <sub-article\n"
+            "article-type='editor-report'> section including assessment text,\n"
+            "editor information, and ratings.\n\n"
+            "Examples:\n"
+            "  jats elife-score paper.xml -o score.json\n"
+            "  jats elife-score paper.xml -o score.json -v\n"
+        ),
+        help="Extract eLife assessment to JSON",
+        formatter_class=RawTextHelpFormatter,
+    )
+
+    subparser.add_argument("xml", type=Path, help="JATS XML file to process")
+
+    subparser.add_argument(
+        "-o",
+        "--output",
+        metavar="OUT",
+        type=Path,
+        required=True,
+        help="Output JSON file",
+    )
+
+    subparser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output",
+    )
+
+    return subparser
+
+
+def validate_elife_score_args(parser: ArgumentParser, args: Namespace) -> None:
+    """Validate elife-score command arguments."""
+    if not args.xml.exists():
+        parser.error(f"Input file does not exist: {args.xml}")
+
+    if not args.xml.suffix.lower() in [".xml", ".jats"]:
+        parser.error(f"Input file must be XML: {args.xml}")
+
+    if args.output.exists():
+        parser.error(f"Output file already exists: {args.output}")
+
+
+def run_elife_score(parser: ArgumentParser, args: Namespace) -> None:
+    """Run the elife-score command."""
+    from .parser import extract_elife_assessment
+    import dataclasses
+
+    validate_elife_score_args(parser, args)
+
+    if args.verbose:
+        print(f"Reading XML: {args.xml}", file=sys.stderr)
+
+    # Extract assessment
+    try:
+        assessment = extract_elife_assessment(str(args.xml))
+    except FileNotFoundError:
+        print(f"Error: XML file not found: {args.xml}", file=sys.stderr)
+        sys.exit(1)
+    except etree.XMLSyntaxError as e:
+        print(f"Error: Invalid XML: {e}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.verbose:
+        print("\nExtracted:", file=sys.stderr)
+        print(f"   Editor: {assessment.editor_name or 'Not found'}", file=sys.stderr)
+        print(f"   Affiliation: {assessment.affiliation or 'Not found'}", file=sys.stderr)
+        print(f"   Significance: {assessment.findings_significance or 'Not found'}", file=sys.stderr)
+        print(f"   Evidence: {assessment.evidence_strength or 'Not found'}", file=sys.stderr)
+        if assessment.assessment:
+            print(f"   Assessment: {len(assessment.assessment)} chars", file=sys.stderr)
+        else:
+            print(f"   Assessment: Not found", file=sys.stderr)
+
+    # Write output
+    try:
+        # Convert dataclass to dict for JSON serialization
+        assessment_dict = dataclasses.asdict(assessment)
+        json_output = json.dumps(assessment_dict, indent=2, ensure_ascii=False)
+        args.output.write_text(json_output, encoding='utf-8')
+        print(f"Saved to: {args.output}", file=sys.stderr)
+    except Exception as e:
+        print(f"Error writing output: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def setup_parser():
     """Create and configure the main argument parser."""
     parser = ArgumentParser(
@@ -626,6 +725,7 @@ def setup_parser():
         "find": setup_find_args(subparsers),
         "text": setup_text_args(subparsers),
         "annotate": setup_annotate_args(subparsers),
+        "elife-score": setup_elife_score_args(subparsers),
     }
 
     return parser, command_to_parser
@@ -647,6 +747,7 @@ def main() -> None:
         "find": run_find,
         "text": run_text,
         "annotate": run_annotate,
+        "elife-score": run_elife_score,
     }
 
     if args.command in command_map:

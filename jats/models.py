@@ -115,3 +115,14 @@ class Article:
     # Metadata for different sources
     is_elife: bool = False
     article_id: Optional[str] = None  # eLife article ID for CDN URLs
+
+
+@dataclass
+class ElifeAssessment:
+    """eLife assessment data from JATS XML editor-report sub-article."""
+
+    assessment: Optional[str] = None  # Assessment body text
+    editor_name: Optional[str] = None  # Reviewing editor name
+    affiliation: Optional[str] = None  # Editor affiliation
+    findings_significance: Optional[str] = None  # Significance rating
+    evidence_strength: Optional[str] = None  # Evidence strength rating

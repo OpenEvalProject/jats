@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 from lxml import etree
 
-from .models import Article, Author, ContentItem, Figure, Reviewer, Section, SubArticle, Table, TableCell
+from .models import Article, Author, ContentItem, ElifeAssessment, Figure, Reviewer, Section, SubArticle, Table, TableCell
 
 
 def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Optional[str]]]:
@@ -1665,3 +1665,109 @@ def find_text_locations(
             results.append({'query': query})
 
     return results
+
+
+def extract_elife_assessment(xml_path: str) -> ElifeAssessment:
+    """Extract eLife assessment from JATS XML editor-report sub-article.
+
+    Args:
+        xml_path: Path to JATS XML file
+
+    Returns:
+        ElifeAssessment dataclass with extracted fields
+
+    Raises:
+        FileNotFoundError: If XML file doesn't exist
+        etree.XMLSyntaxError: If XML is malformed
+        ValueError: If no editor-report sub-article found
+    """
+    # Parse XML
+    try:
+        tree = etree.parse(xml_path)
+        root = tree.getroot()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"XML file not found: {xml_path}")
+    except etree.XMLSyntaxError as e:
+        raise etree.XMLSyntaxError(f"Invalid XML: {e}")
+
+    # Find editor-report
+    editor_report = root.find(".//sub-article[@article-type='editor-report']")
+    if editor_report is None:
+        raise ValueError("No editor-report sub-article found")
+
+    # Extract fields (all wrapped in try/except, return None if missing)
+
+    # Evidence strength
+    evidence_strength = None
+    try:
+        elem = editor_report.find(".//kwd-group[@kwd-group-type='evidence-strength']/kwd")
+        if elem is not None and elem.text:
+            evidence_strength = elem.text.strip()
+    except Exception:
+        pass
+
+    # Findings significance
+    findings_significance = None
+    try:
+        elem = editor_report.find(".//kwd-group[@kwd-group-type='claim-importance']/kwd")
+        if elem is not None and elem.text:
+            findings_significance = elem.text.strip()
+    except Exception:
+        pass
+
+    # Editor name and affiliation (extract from same contrib element)
+    editor_name = None
+    affiliation = None
+    try:
+        # Find all contrib elements with contrib-type='author'
+        for contrib in editor_report.findall(".//contrib[@contrib-type='author']"):
+            # Check if this contrib has an editor role
+            role = contrib.find(".//role[@specific-use='editor']")
+            if role is not None:
+                # Extract name
+                surname = contrib.find(".//surname")
+                given = contrib.find(".//given-names")
+                if surname is not None and given is not None:
+                    s = surname.text.strip() if surname.text else ""
+                    g = given.text.strip() if given.text else ""
+                    if s and g:
+                        editor_name = f"{g} {s}"
+
+                # Extract affiliation
+                # Try direct institution
+                aff = contrib.find(".//aff/institution")
+                if aff is None:
+                    # Try institution-wrap
+                    aff = contrib.find(".//aff/institution-wrap/institution")
+                if aff is not None and aff.text:
+                    affiliation = aff.text.strip()
+
+                # Found the editor, no need to continue
+                break
+    except Exception:
+        pass
+
+    # Assessment text
+    assessment_text = None
+    try:
+        body = editor_report.find(".//body")
+        if body is not None:
+            paragraphs = body.findall(".//p")
+            if paragraphs:
+                para_texts = []
+                for p in paragraphs:
+                    text = "".join(p.itertext()).strip()
+                    if text:
+                        para_texts.append(text)
+                if para_texts:
+                    assessment_text = "\n\n".join(para_texts)
+    except Exception:
+        pass
+
+    return ElifeAssessment(
+        assessment=assessment_text,
+        editor_name=editor_name,
+        affiliation=affiliation,
+        findings_significance=findings_significance,
+        evidence_strength=evidence_strength
+    )
