@@ -1,6 +1,7 @@
 """JATS XML parser."""
 
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -353,6 +354,76 @@ def mathml_to_latex(elem: etree.Element) -> str:
         parts.append(mathml_to_latex(child))
     return ''.join(parts)
 
+def clean_tex_math(tex_text: str) -> str:
+    """Clean TeX/LaTeX stored inside <tex-math>."""
+    if not tex_text:
+        return ""
+
+    tex_text = tex_text.strip()
+    tex_text = tex_text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # If publisher stuffed a full LaTeX document in here, keep only the body
+    document_match = re.search(
+        r"\\begin\{document\}(.*?)\\end\{document\}",
+        tex_text,
+        flags=re.S,
+    )
+    if document_match:
+        tex_text = document_match.group(1).strip()
+
+    tex_text = tex_text.strip()
+
+    # Remove one layer of outer math delimiters
+    for pattern in [
+        r"^\$\$(.*?)\$\$$",
+        r"^\\\[(.*?)\\\]$",
+        r"^\\\((.*?)\\\)$",
+        r"^\$(.*?)\$$",
+    ]:
+        match = re.match(pattern, tex_text, flags=re.S)
+        if match:
+            tex_text = match.group(1).strip()
+            break
+
+    tex_text = re.sub(r"\s+", " ", tex_text).strip()
+    return tex_text
+
+
+def extract_formula_latex(formula_elem: etree.Element) -> str:
+    """Extract best formula representation from a JATS formula element.
+
+    Preference:
+    1. MathML
+    2. tex-math
+    3. textual-form
+    """
+    # Prefer MathML first
+    math_elem = formula_elem.find('.//{http://www.w3.org/1998/Math/MathML}math')
+    if math_elem is None:
+        math_elem = formula_elem.find('.//math')
+
+    if math_elem is not None:
+        latex = mathml_to_latex(math_elem).strip()
+        if latex:
+            return latex
+
+    # Then cleaned tex-math
+    tex_elem = formula_elem.find('.//tex-math')
+    if tex_elem is not None:
+        tex_text = ''.join(tex_elem.itertext())
+        tex_text = clean_tex_math(tex_text)
+        if tex_text:
+            return tex_text
+
+    # Then textual-form
+    textual_elem = formula_elem.find('.//textual-form')
+    if textual_elem is not None:
+        textual_text = ''.join(textual_elem.itertext()).strip()
+        textual_text = re.sub(r"\s+", " ", textual_text)
+        if textual_text:
+            return textual_text
+
+    return ""
 
 def parse_doi(root: etree.Element) -> str:
     """Extract DOI from article metadata."""
@@ -744,7 +815,7 @@ def parse_tables(root: etree.Element, no_refs: bool = False) -> Dict[str, Table]
                 for tr in thead.findall('tr'):
                     header_row = []
                     for cell in tr.findall('td') + tr.findall('th'):
-                        cell_text = ''.join(cell.itertext()).strip()
+                        cell_text = extract_text_with_citations(cell, no_refs=no_refs).strip()
 
                         # Extract rowspan and colspan attributes
                         rowspan = cell.get('rowspan')
@@ -767,7 +838,7 @@ def parse_tables(root: etree.Element, no_refs: bool = False) -> Dict[str, Table]
                 for tr in tbody.findall('tr'):
                     row = []
                     for cell in tr.findall('td') + tr.findall('th'):
-                        cell_text = ''.join(cell.itertext()).strip()
+                        cell_text = extract_text_with_citations(cell, no_refs=no_refs).strip()
 
                         # Extract rowspan and colspan attributes
                         rowspan = cell.get('rowspan')
@@ -788,7 +859,7 @@ def parse_tables(root: etree.Element, no_refs: bool = False) -> Dict[str, Table]
         footer = None
         footer_elem = table_wrap.find('table-wrap-foot')
         if footer_elem is not None:
-            footer_text = ''.join(footer_elem.itertext()).strip()
+            footer_text = extract_text_with_citations(footer_elem, no_refs=no_refs).strip()
             footer = footer_text if footer_text else None
 
         tables[table_id] = Table(
@@ -825,6 +896,25 @@ def extract_text_with_citations(
         references = {}
     if figure_urls is None:
         figure_urls = {}
+
+    # IMPORTANT:
+    # Sometimes this function is called on an inline-formula node directly
+    # (for example in paragraphs with embedded figures/tables).
+    # Handle that here so we do not recurse into <alternatives>/<tex-math>.
+    if elem.tag == 'inline-formula':
+        latex = extract_formula_latex(elem)
+        return f'${latex}$' if latex else ''
+
+    if elem.tag == 'disp-formula':
+        latex = extract_formula_latex(elem)
+        return f'\n\n$$\n{latex}\n$$\n\n' if latex else ''
+
+    # Never expose raw TeX blobs or inline graphic fallbacks as text
+    if elem.tag == 'tex-math':
+        return ''
+
+    if elem.tag == 'inline-graphic':
+        return ''
 
     parts = []
 
@@ -870,36 +960,15 @@ def extract_text_with_citations(
 
         # Handle inline formulas
         elif child.tag == 'inline-formula':
-            # Find the math element (check both with and without namespace)
-            math_elem = child.find('.//{http://www.w3.org/1998/Math/MathML}math')
-            if math_elem is None:
-                # Try without namespace prefix
-                math_elem = child.find('.//math')
-
-            if math_elem is not None:
-                # Convert MathML to LaTeX
-                latex = mathml_to_latex(math_elem)
-                # Wrap in inline math delimiters
+            latex = extract_formula_latex(child)
+            if latex:
                 parts.append(f'${latex}$')
-            else:
-                # Fallback to plain text
-                parts.append(''.join(child.itertext()))
 
         # Handle display formulas (embedded in paragraphs)
         elif child.tag == 'disp-formula':
-            # Find the math element
-            math_elem = child.find('.//{http://www.w3.org/1998/Math/MathML}math')
-            if math_elem is None:
-                math_elem = child.find('.//math')
-
-            if math_elem is not None:
-                # Convert MathML to LaTeX
-                latex = mathml_to_latex(math_elem)
-                # Display formulas get their own line with $$...$$
+            latex = extract_formula_latex(child)
+            if latex:
                 parts.append(f'\n\n$$\n{latex}\n$$\n\n')
-            else:
-                # Fallback to plain text
-                parts.append(''.join(child.itertext()))
 
         # Handle named-content elements (claim annotations)
         elif child.tag == 'named-content' and child.get('content-type') == 'scientific-claim':
@@ -1114,11 +1183,8 @@ def parse_body(
                     )
 
             elif child.tag == 'disp-formula':
-                # Display formula as direct child of section
-                math_elem = child.find('.//{http://www.w3.org/1998/Math/MathML}math')
-                if math_elem is not None:
-                    latex = mathml_to_latex(math_elem)
-                    # Display formulas get their own paragraph with $$...$$
+                latex = extract_formula_latex(child)
+                if latex:
                     formula_text = f'$$\n{latex}\n$$'
                     section.content_items.append(
                         ContentItem(item_type='paragraph', text=formula_text)
