@@ -1,6 +1,6 @@
 """Test article type classification for peer review materials."""
 
-from jxp.models import SubArticle
+from jats.models import SubArticle
 
 
 def test_article_type_classification():

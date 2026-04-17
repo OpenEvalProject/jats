@@ -1,6 +1,6 @@
 """Test review extraction logic from main.py."""
 
-from jxp.models import Article, SubArticle
+from jats.models import Article, SubArticle
 
 
 def test_review_extraction_logic():
