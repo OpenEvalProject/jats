@@ -1,6 +1,7 @@
 """Main CLI entry point for jats."""
 
 import json
+import re
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter
 from pathlib import Path
@@ -710,6 +711,143 @@ def run_elife_score(parser: ArgumentParser, args: Namespace) -> None:
         sys.exit(1)
 
 
+def setup_bib_args(subparsers) -> ArgumentParser:
+    """Setup the bib command arguments."""
+    subparser = subparsers.add_parser(
+        "bib",
+        description=(
+            "Generate BibTeX reference from JATS XML metadata.\n\n"
+            "Extracts DOI, title, authors, publication date from JATS XML\n"
+            "and generates a properly formatted BibTeX entry.\n\n"
+            "Examples:\n"
+            "  jats bib paper.xml\n"
+            "  jats bib paper.xml -o reference.bib\n"
+        ),
+        help="Generate BibTeX reference from JATS XML",
+        formatter_class=RawTextHelpFormatter,
+    )
+
+    subparser.add_argument("xml", type=Path, help="JATS XML file to process")
+
+    subparser.add_argument(
+        "-o",
+        "--output",
+        metavar="OUT",
+        type=Path,
+        help="Output BibTeX file (default: stdout)",
+        default=None,
+    )
+
+    return subparser
+
+
+def validate_bib_args(parser: ArgumentParser, args: Namespace) -> None:
+    """Validate bib command arguments."""
+    if not args.xml.exists():
+        parser.error(f"Input file does not exist: {args.xml}")
+
+    if not args.xml.suffix.lower() in [".xml", ".jats"]:
+        parser.error(f"Input file must be XML: {args.xml}")
+
+    if args.output and args.output.exists() and not args.output.is_file():
+        parser.error(f"Output path exists but is not a file: {args.output}")
+
+
+def _escape_latex(text: str) -> str:
+    if not text:
+        return ""
+    for char, esc in [("&", r"\&"), ("%", r"\%"), ("$", r"\$"),
+                      ("#", r"\#"), ("_", r"\_"), ("{", r"\{"),
+                      ("}", r"\}"), ("~", r"\textasciitilde{}"),
+                      ("^", r"\textasciicircum{}")]:
+        text = text.replace(char, esc)
+    return text
+
+
+def _find_text(root: etree.Element, *xpaths: str) -> str | None:
+    for xpath in xpaths:
+        elem = root.find(xpath)
+        if elem is not None and elem.text and elem.text.strip():
+            return elem.text.strip()
+    return None
+
+
+def run_bib(parser: ArgumentParser, args: Namespace) -> None:
+    """Run the bib command."""
+    validate_bib_args(parser, args)
+
+    tree = etree.parse(str(args.xml))
+    root = tree.getroot()
+
+    doi = parse_doi(root)
+    title = parse_title(root)
+    pub_date = parse_pub_date(root)
+    authors, _ = parse_authors(root)
+
+    journal = _find_text(
+        root,
+        './/journal-meta/journal-title-group/journal-title',
+        './/journal-meta/journal-title',
+    )
+    publisher = _find_text(root, './/journal-meta/publisher/publisher-name')
+    issn = _find_text(
+        root,
+        './/journal-meta/issn[@pub-type="epub"]',
+        './/journal-meta/issn[@pub-type="ppub"]',
+        './/journal-meta/issn',
+    )
+    volume = _find_text(root, './/article-meta/volume')
+
+    if not doi:
+        print("Error: No DOI found in XML", file=sys.stderr)
+        sys.exit(1)
+
+    year = pub_date[:4] if pub_date else "0000"
+
+    if authors:
+        first_surname = authors[0].surname or "Unknown"
+        key = re.sub(r'[^a-zA-Z]', '_', first_surname)
+    else:
+        key = "Unknown"
+    bibtex_key = f"{key}_{year}"
+
+    author_strings = []
+    for author in sorted(authors, key=lambda x: x.position or 0):
+        if author.surname and author.given_names:
+            author_strings.append(f"{author.surname}, {author.given_names}")
+        elif author.surname:
+            author_strings.append(author.surname)
+    author_str = " and ".join(author_strings)
+
+    fields = [("title", _escape_latex(title))]
+    if volume:
+        fields.append(("volume", volume))
+    if issn:
+        fields.append(("issn", issn))
+    fields.append(("url", f"https://doi.org/{doi}"))
+    fields.append(("doi", doi.lower()))
+    if journal:
+        fields.append(("journal", journal))
+    if publisher:
+        fields.append(("publisher", publisher))
+    fields.append(("author", author_str))
+    fields.append(("year", year))
+
+    lines = [f"@article{{{bibtex_key},"]
+    for i, (name, value) in enumerate(fields):
+        suffix = "," if i < len(fields) - 1 else ""
+        lines.append(f"  {name:<9} = {{{value}}}{suffix}")
+    lines.append("}")
+
+    bibtex = "\n".join(lines) + "\n"
+
+    if args.output:
+        args.output.write_text(bibtex, encoding='utf-8')
+        print(f"Generated BibTeX: {args.xml} -> {args.output}", file=sys.stderr)
+    else:
+        print(bibtex)
+
+
 def setup_parser():
     """Create and configure the main argument parser."""
     parser = ArgumentParser(
@@ -726,6 +864,7 @@ def setup_parser():
         "text": setup_text_args(subparsers),
         "annotate": setup_annotate_args(subparsers),
         "elife-score": setup_elife_score_args(subparsers),
+        "bib": setup_bib_args(subparsers),
     }
 
     return parser, command_to_parser
@@ -748,6 +887,7 @@ def main() -> None:
         "text": run_text,
         "annotate": run_annotate,
         "elife-score": run_elife_score,
+        "bib": run_bib,
     }
 
     if args.command in command_map:
