@@ -1,6 +1,5 @@
 """JATS XML parser."""
 
-import os
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple

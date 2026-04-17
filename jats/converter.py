@@ -1,7 +1,5 @@
 """Markdown converter for JATS articles."""
 
-from typing import List
-
 from .models import Article, Figure, SubArticle, Table
 
 

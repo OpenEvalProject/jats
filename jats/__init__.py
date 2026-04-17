@@ -1,6 +1,11 @@
 """jats: JATS XML Parser for scientific articles."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("jats")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
 
 # Core parsing functions
 from .parser import (
