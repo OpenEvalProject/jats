@@ -1,6 +1,6 @@
 """Test combined review extraction with revision rounds."""
 
-from jxp.models import Article, SubArticle
+from jats.models import Article, SubArticle
 
 
 def test_combined_reviews_with_rounds():
