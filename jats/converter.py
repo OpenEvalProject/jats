@@ -123,11 +123,12 @@ def format_figure_markdown(figure: Figure, article_id: str = None, is_elife: boo
     return '\n'.join(parts)
 
 
-def convert_to_markdown(article: Article) -> str:
+def convert_to_markdown(article: Article, no_refs: bool = False) -> str:
     """Convert Article object to markdown.
 
     Args:
         article: Article object
+        no_refs: If True, omit DOI hyperlinks from the reference list
 
     Returns:
         Markdown formatted text
@@ -188,8 +189,7 @@ def convert_to_markdown(article: Article) -> str:
         md_parts.append("## Abstract\n")
         md_parts.append(article.abstract + "\n")
 
-    # Body sections
-    for section in article.body:
+    def render_section(section):
         if section.title:
             # Use section.level to generate correct heading (##, ###, ####, etc.)
             heading_prefix = '#' * section.level
@@ -207,6 +207,26 @@ def convert_to_markdown(article: Article) -> str:
                 )
             elif item.item_type == 'table' and item.table:
                 md_parts.append(format_table_markdown(item.table))
+
+    # Body sections
+    for section in article.body:
+        render_section(section)
+
+    # Back matter (Methods, figure legends, availability, acknowledgements, …)
+    for section in article.back:
+        render_section(section)
+
+    # Reference list (from <ref-list>). Article.references stays the inline-citation DOI map;
+    # this is the human-readable bibliography.
+    if article.bibliography:
+        md_parts.append("## References\n")
+        for ref in article.bibliography:
+            prefix = f"{ref.label} " if ref.label else ""
+            line = f"{prefix}{ref.text}".strip()
+            if ref.doi and not no_refs:
+                line += f" https://doi.org/{ref.doi}"
+            md_parts.append(f"- {line}")
+        md_parts.append("")
 
     return '\n'.join(md_parts)
 
