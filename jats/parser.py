@@ -1471,9 +1471,40 @@ def parse_jats_xml(
 
     Returns:
         Article object
+
+    Raises:
+        ValueError: if the input is not JATS (e.g. a bioRxiv "Page Not Found" HTML page
+            or a rate-limit stub served with a .xml URL) — with a clear message instead of
+            a cryptic lxml EntityRef error deep in parsing.
     """
-    tree = etree.parse(str(xml_path))
-    root = tree.getroot()
+    try:
+        tree = etree.parse(str(xml_path))
+        root = tree.getroot()
+    except etree.XMLSyntaxError as e:
+        # Malformed XML — most often an HTML landing/error page (unescaped & in a
+        # <script>) that a .source.xml URL returned on 404 / rate-limit. Sniff the bytes
+        # to give an actionable message.
+        head = b""
+        try:
+            head = open(xml_path, "rb").read(4096)
+        except OSError:
+            pass
+        low = head.lower()
+        if b"<!doctype html" in low or b"page not found" in low or b"<html" in low:
+            raise ValueError(
+                f"{xml_path} is an HTML page, not JATS XML "
+                "(likely a 404 / rate-limit response served for a .source.xml URL). "
+                "Re-download the source XML."
+            ) from e
+        raise ValueError(f"{xml_path} is not well-formed XML: {e}") from e
+
+    # Reject well-formed-but-not-JATS documents (e.g. an XHTML landing page).
+    tag = etree.QName(root).localname if root.tag is not None else ""
+    if tag != "article" and root.find(".//article") is None:
+        raise ValueError(
+            f"{xml_path} has root <{tag}>, not a JATS <article>. "
+            "This does not look like a JATS XML document."
+        )
 
     # Auto-detect manifest.xml if not provided
     if manifest_path is None:
