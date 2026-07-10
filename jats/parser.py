@@ -14,6 +14,30 @@ from .models import Article, Author, ContentItem, ElifeAssessment, Figure, Revie
 # the bare filename the XML carries. Module-level so existing function signatures stay stable.
 IMAGE_BASE: Optional[str] = None
 
+# Artifact glyphs some publisher XML uses in place of a (thin/no-break) space — e.g.
+# "mean□±□s.e.m", "P□<□0.05" where □ is U+25A1 WHITE SQUARE. These are broken spacing,
+# not content, so normalize them to a plain space in emitted text. Kept deliberately narrow:
+# only geometric "box" glyphs + the Unicode replacement char, which never carry real meaning.
+_ARTIFACT_SPACE = {
+    "□": " ",  # □ WHITE SQUARE
+    "■": " ",  # ■ BLACK SQUARE
+    "▫": " ",  # ▫ WHITE SMALL SQUARE
+    "▪": " ",  # ▪ BLACK SMALL SQUARE
+    "�": "",   # � REPLACEMENT CHARACTER (dropped entirely)
+}
+_ARTIFACT_TABLE = str.maketrans(_ARTIFACT_SPACE)
+
+
+def clean_artifact_chars(text: str) -> str:
+    """Replace broken spacing/box glyphs (U+25A1 etc.) with a normal space and collapse
+    any resulting double spaces. Content-preserving: only touches known-garbage glyphs."""
+    if not text:
+        return text
+    out = text.translate(_ARTIFACT_TABLE)
+    if out != text:
+        out = re.sub(r"  +", " ", out)
+    return out
+
 
 def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Optional[str]]]:
     """Parse detailed affiliation information from JATS XML.
@@ -1051,7 +1075,7 @@ def extract_text_with_citations(
         if child.tail:
             parts.append(child.tail)
 
-    return ''.join(parts)
+    return clean_artifact_chars(''.join(parts))
 
 
 def parse_body(
@@ -1102,7 +1126,7 @@ def parse_body(
         title_elem = sec.find('title')
         if title_elem is not None:
             # Use itertext() to get all text including from child elements like <italic>
-            section.title = ''.join(title_elem.itertext()).strip()
+            section.title = clean_artifact_chars(''.join(title_elem.itertext()).strip())
 
         # Get section content (paragraphs and figures in order)
         for child in sec:

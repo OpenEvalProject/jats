@@ -85,3 +85,23 @@ def test_graphic_only_equation_without_graphic_falls_back_to_placeholder(tmp_pat
     # An image-less empty disp-formula still must not dangle: placeholder kept.
     md = _md(tmp_path, "noeq.xml", NO_GRAPHIC_EQ_XML)
     assert "equation: image in source, not transcribable from XML" in md
+
+
+ARTIFACT_XML = """<?xml version="1.0"?>
+<article>
+  <front><article-meta>
+    <title-group><article-title>Box Test</article-title></title-group>
+  </article-meta></front>
+  <body><sec><title>Stats</title>
+    <p>Data are mean□±□s.e.m. Significance: *P□&lt;□0.05.</p>
+  </sec></body>
+</article>
+"""
+
+
+def test_artifact_box_glyphs_become_spaces(tmp_path):
+    # U+25A1 WHITE SQUARE used as a spacing glyph in publisher XML -> normal space.
+    md = _md(tmp_path, "box.xml", ARTIFACT_XML)
+    assert "□" not in md                      # no box glyphs leak
+    assert "mean ± s.e.m." in md                   # spacing restored
+    assert "*P < 0.05." in md
