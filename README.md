@@ -131,7 +131,9 @@ jats converts JATS XML to clean, readable Markdown with:
 - Abstract
 - Body sections with appropriate heading levels
 - Inline figures with captions
-- References (when available)
+- **Back matter**: Methods, figure legends, data/code availability, acknowledgements
+  (bioRxiv places these in `<back>`). Use `--no-back` to emit body only.
+- A formatted `## References` list from `<ref-list>` (with DOI links; `--no-refs` strips the links)
 
 ### Peer Review Output
 

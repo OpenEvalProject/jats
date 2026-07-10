@@ -450,9 +450,9 @@ def setup_text_args(subparsers) -> ArgumentParser:
 
     subparser.add_argument(
         "--section",
-        choices=["all", "abstract", "body"],
+        choices=["all", "abstract", "body", "back"],
         default="all",
-        help="Which section to extract (default: all)",
+        help="Which section to extract (default: all; 'back' = Methods/legends/refs)",
     )
 
     return subparser
@@ -521,6 +521,20 @@ def run_text(parser: ArgumentParser, args: Namespace) -> None:
             body_text = ' '.join(body.itertext()).strip()
             if body_text:
                 text_parts.append(body_text)
+
+    if args.section in ["all", "back"]:
+        # Extract back matter (Methods, figure legends, references, acknowledgements).
+        # bioRxiv parks the bulk of a paper here; without this, `text --section all`
+        # silently drops ~2/3 of a preprint (mirrors the convert-command <back> fix).
+        back = root.find('.//back')
+        if back is not None:
+            for obj_id in back.findall('.//object-id[@pub-id-type="doi"]'):
+                parent = obj_id.getparent()
+                if parent is not None:
+                    parent.remove(obj_id)
+            back_text = ' '.join(back.itertext()).strip()
+            if back_text:
+                text_parts.append(back_text)
 
     # Join with double newline (paragraph spacing)
     full_text = '\n\n'.join(text_parts)

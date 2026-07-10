@@ -111,3 +111,30 @@ def test_article_without_back_still_converts(tmp_path):
     assert article.bibliography == []
     assert "## References" not in md               # no empty References section
     assert "Only a body here" in md
+
+
+def test_text_command_section_back(tmp_path, capsys):
+    """`text --section back` (and `all`) must include <back>; body-only must not.
+
+    Regression for the text/convert consistency gap: convert read <back> but `text`
+    still only read <body>."""
+    from argparse import Namespace
+    from jats.main import run_text
+
+    xml = _write(tmp_path, "back.xml", BACK_XML)
+
+    def run(section):
+        run_text(parser=None, args=Namespace(xml=xml, section=section, output=None))
+        return capsys.readouterr().out
+
+    back = run("back")
+    assert "experiment carefully" in back            # Methods paragraph from <back>
+    assert "great paper" in back                     # reference text from <ref-list>
+
+    allsec = run("all")
+    assert "experiment carefully" in allsec          # back included in 'all'
+    assert "Body intro paragraph" in allsec          # body still there
+
+    body = run("body")
+    assert "Body intro paragraph" in body
+    assert "experiment carefully" not in body        # back NOT leaked into body-only
