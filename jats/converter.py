@@ -150,10 +150,10 @@ def convert_to_markdown(article: Article) -> str:
         for author in article.authors:
             author_line = f"{author.given_names} {author.surname}"
 
-            # Add affiliation superscript
+            # Add affiliation superscript (Markdown ^...^, not raw HTML <sup>)
             if author.affiliation_id and author.affiliation_id in aff_map:
                 aff_num = aff_map[author.affiliation_id]
-                author_line += f"<sup>{aff_num}</sup>"
+                author_line += f"^{aff_num}^"
 
             # Add ORCID
             if author.orcid:

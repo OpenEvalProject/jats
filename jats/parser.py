@@ -906,7 +906,9 @@ def extract_text_with_citations(
 
     if elem.tag == 'disp-formula':
         latex = extract_formula_latex(elem)
-        return f'\n\n$$\n{latex}\n$$\n\n' if latex else ''
+        if latex:
+            return f'\n\n$$\n{latex}\n$$\n\n'
+        return '\n\n*[equation: image in source, not transcribable from XML]*\n\n'
 
     # Never expose raw TeX blobs or inline graphic fallbacks as text
     if elem.tag == 'tex-math':
@@ -957,6 +959,14 @@ def extract_text_with_citations(
                     # No URL available, keep plain text
                     parts.append(figure_text)
 
+        # Superscript / subscript -> Markdown (^x^ / ~x~), not raw <sup>/<sub> HTML.
+        elif child.tag == 'sup':
+            inner = extract_text_with_citations(child, references, figure_urls, no_refs).strip()
+            parts.append(f'^{inner}^' if inner else '')
+        elif child.tag == 'sub':
+            inner = extract_text_with_citations(child, references, figure_urls, no_refs).strip()
+            parts.append(f'~{inner}~' if inner else '')
+
         # Handle inline formulas
         elif child.tag == 'inline-formula':
             latex = extract_formula_latex(child)
@@ -968,6 +978,11 @@ def extract_text_with_citations(
             latex = extract_formula_latex(child)
             if latex:
                 parts.append(f'\n\n$$\n{latex}\n$$\n\n')
+            else:
+                # Equation is a <graphic> image (no MathML/TeX in the XML) — can't
+                # transcribe it from text. Emit a visible placeholder so the sentence
+                # isn't left dangling ("...described by the equation:" then nothing).
+                parts.append('\n\n*[equation: image in source, not transcribable from XML]*\n\n')
 
         # Handle named-content elements (claim annotations)
         elif child.tag == 'named-content' and child.get('content-type') == 'scientific-claim':
@@ -1185,9 +1200,12 @@ def parse_body(
                 latex = extract_formula_latex(child)
                 if latex:
                     formula_text = f'$$\n{latex}\n$$'
-                    section.content_items.append(
-                        ContentItem(item_type='paragraph', text=formula_text)
-                    )
+                else:
+                    # graphic-only equation (no MathML/TeX) — visible placeholder
+                    formula_text = '*[equation: image in source, not transcribable from XML]*'
+                section.content_items.append(
+                    ContentItem(item_type='paragraph', text=formula_text)
+                )
 
             elif child.tag == 'sec':
                 # Nested section - skip for now
