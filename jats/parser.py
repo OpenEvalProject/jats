@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 from lxml import etree
 
-from .models import Article, Author, ContentItem, ElifeAssessment, Figure, Reviewer, Section, SubArticle, Table, TableCell
+from .models import Article, Author, BibReference, ContentItem, ElifeAssessment, Figure, Reviewer, Section, SubArticle, Table, TableCell
 
 
 def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Optional[str]]]:
@@ -998,9 +998,10 @@ def parse_body(
     tables: Optional[Dict[str, Table]] = None,
     references: Optional[Dict[str, str]] = None,
     figure_urls: Optional[Dict[str, str]] = None,
-    no_refs: bool = False
+    no_refs: bool = False,
+    container_tag: str = 'body',
 ) -> List[Section]:
-    """Parse article body sections.
+    """Parse article sections from a container element.
 
     Args:
         root: Root XML element
@@ -1009,6 +1010,9 @@ def parse_body(
         references: Dictionary mapping ref-ids to DOIs
         figure_urls: Dictionary mapping figure-ids to image URLs
         no_refs: If True, strip URL links from references
+        container_tag: Container to parse sections from — 'body' (default) or 'back'.
+            bioRxiv places Methods / figure legends / availability / acknowledgements
+            in <back>, so parse_back() reuses this with container_tag='back'.
 
     Returns:
         List of Section objects
@@ -1020,7 +1024,7 @@ def parse_body(
     if figure_urls is None:
         figure_urls = {}
 
-    body = root.find('.//body')
+    body = root.find(f'.//{container_tag}')
     if body is None:
         return []
 
@@ -1199,6 +1203,90 @@ def parse_body(
     return sections
 
 
+def parse_back(
+    root: etree.Element,
+    figures: Optional[Dict[str, Figure]] = None,
+    tables: Optional[Dict[str, Table]] = None,
+    references: Optional[Dict[str, str]] = None,
+    figure_urls: Optional[Dict[str, str]] = None,
+    no_refs: bool = False,
+) -> List[Section]:
+    """Parse <back> matter sections (Methods, figure legends, data/code availability,
+    author contributions, acknowledgements) into Section objects.
+
+    bioRxiv parks the bulk of a paper here; eLife's <back> is lighter. Reuses parse_body's
+    section machinery, then appends <ack> (acknowledgements), which JATS models as a sibling
+    of <sec> rather than a <sec>. The <ref-list> is rendered separately (parse_bibliography),
+    so it is intentionally not turned into prose here.
+
+    Returns:
+        List of Section objects (empty if no <back>).
+    """
+    sections = parse_body(
+        root, figures, tables, references, figure_urls, no_refs, container_tag='back'
+    )
+
+    # <ack> is not a <sec>; surface it as an Acknowledgements section if not already present.
+    back = root.find('.//back')
+    if back is not None:
+        have_ack = any((s.title or '').strip().lower().startswith('acknowledge')
+                       for s in sections)
+        for ack in back.findall('.//ack'):
+            paras = [
+                extract_text_with_citations(p, references or {}, figure_urls or {}, no_refs).strip()
+                for p in ack.findall('.//p')
+            ]
+            paras = [p for p in paras if p]
+            if not paras:
+                continue
+            title_elem = ack.find('title')
+            title = (''.join(title_elem.itertext()).strip()
+                     if title_elem is not None else 'Acknowledgements')
+            if have_ack and title.lower().startswith('acknowledge'):
+                continue
+            sec = Section(level=2, title=title)
+            for p in paras:
+                sec.content_items.append(ContentItem(item_type='paragraph', text=p))
+            sections.append(sec)
+
+    return sections
+
+
+def parse_bibliography(root: etree.Element) -> List[BibReference]:
+    """Parse the <ref-list> into human-readable bibliographic entries.
+
+    Distinct from parse_references() (which builds an id->DOI map for hyperlinking inline
+    citations). Uses the citation element's itertext() as the display string — the source
+    already orders author/title/journal/year correctly, so this is faithful and robust across
+    the <citation> / <element-citation> / <mixed-citation> variants publishers use.
+
+    Returns:
+        List of BibReference in document order (empty if no <ref-list>).
+    """
+    refs: List[BibReference] = []
+    for ref in root.findall('.//ref-list/ref') or root.findall('.//ref-list//ref'):
+        ref_id = ref.get('id') or ''
+        label_elem = ref.find('label')
+        label = ''.join(label_elem.itertext()).strip() if label_elem is not None else None
+
+        citation = (ref.find('.//element-citation')
+                    or ref.find('.//mixed-citation')
+                    or ref.find('.//citation'))
+        if citation is not None:
+            text = ' '.join(''.join(citation.itertext()).split())
+        else:
+            text = ' '.join(''.join(ref.itertext()).split())
+            if label:  # avoid leading duplicate of the label
+                text = text[len(label):].strip() if text.startswith(label) else text
+
+        doi_elem = ref.find('.//pub-id[@pub-id-type="doi"]')
+        doi = doi_elem.text.strip() if doi_elem is not None and doi_elem.text else None
+
+        if text or label:
+            refs.append(BibReference(ref_id=ref_id, label=label, text=text, doi=doi))
+    return refs
+
+
 def parse_reviewers(sub_article: etree.Element) -> List[Reviewer]:
     """Parse reviewer information from sub-article.
 
@@ -1370,7 +1458,8 @@ def parse_sub_articles(
 def parse_jats_xml(
     xml_path: Path,
     manifest_path: Optional[Path] = None,
-    no_refs: bool = False
+    no_refs: bool = False,
+    no_back: bool = False
 ) -> Article:
     """Parse JATS XML file and return Article object.
 
@@ -1378,12 +1467,44 @@ def parse_jats_xml(
         xml_path: Path to XML file
         manifest_path: Optional path to manifest.xml
         no_refs: If True, strip URL links from references
+        no_back: If True, skip <back> matter (Methods, legends, references)
 
     Returns:
         Article object
+
+    Raises:
+        ValueError: if the input is not JATS (e.g. a bioRxiv "Page Not Found" HTML page
+            or a rate-limit stub served with a .xml URL) — with a clear message instead of
+            a cryptic lxml EntityRef error deep in parsing.
     """
-    tree = etree.parse(str(xml_path))
-    root = tree.getroot()
+    try:
+        tree = etree.parse(str(xml_path))
+        root = tree.getroot()
+    except etree.XMLSyntaxError as e:
+        # Malformed XML — most often an HTML landing/error page (unescaped & in a
+        # <script>) that a .source.xml URL returned on 404 / rate-limit. Sniff the bytes
+        # to give an actionable message.
+        head = b""
+        try:
+            head = open(xml_path, "rb").read(4096)
+        except OSError:
+            pass
+        low = head.lower()
+        if b"<!doctype html" in low or b"page not found" in low or b"<html" in low:
+            raise ValueError(
+                f"{xml_path} is an HTML page, not JATS XML "
+                "(likely a 404 / rate-limit response served for a .source.xml URL). "
+                "Re-download the source XML."
+            ) from e
+        raise ValueError(f"{xml_path} is not well-formed XML: {e}") from e
+
+    # Reject well-formed-but-not-JATS documents (e.g. an XHTML landing page).
+    tag = etree.QName(root).localname if root.tag is not None else ""
+    if tag != "article" and root.find(".//article") is None:
+        raise ValueError(
+            f"{xml_path} has root <{tag}>, not a JATS <article>. "
+            "This does not look like a JATS XML document."
+        )
 
     # Auto-detect manifest.xml if not provided
     if manifest_path is None:
@@ -1424,6 +1545,11 @@ def parse_jats_xml(
     tables = parse_tables(root, no_refs)
     figure_urls = build_figure_urls(figures, article_id, is_elife)
     body = parse_body(root, figures, tables, references, figure_urls, no_refs)
+    if no_back:
+        back, bibliography = [], []
+    else:
+        back = parse_back(root, figures, tables, references, figure_urls, no_refs)
+        bibliography = parse_bibliography(root)  # no_refs only strips DOI links, in converter
     sub_articles = parse_sub_articles(root, figures)
 
     return Article(
@@ -1435,6 +1561,8 @@ def parse_jats_xml(
         figure_urls=figure_urls,
         abstract=abstract,
         body=body,
+        back=back,
+        bibliography=bibliography,
         sub_articles=sub_articles,
         is_elife=is_elife,
         article_id=article_id,

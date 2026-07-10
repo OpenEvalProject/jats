@@ -72,6 +72,20 @@ class Section:
 
 
 @dataclass
+class BibReference:
+    """A bibliographic entry from <ref-list>.
+
+    Distinct from Article.references, which is an id->DOI map used to hyperlink inline
+    citations. This is the human-readable reference list rendered under ## References.
+    """
+
+    ref_id: str
+    label: Optional[str] = None   # printed marker, e.g. "4."
+    text: str = ""                # display string (author, title, journal, year, …)
+    doi: Optional[str] = None
+
+
+@dataclass
 class Reviewer:
     """Reviewer information from sub-article."""
 
@@ -110,6 +124,8 @@ class Article:
     figure_urls: Dict[str, str] = field(default_factory=dict)  # figure-id -> image URL
     abstract: str = ""
     body: List[Section] = field(default_factory=list)
+    back: List[Section] = field(default_factory=list)  # Methods, legends, availability, ack…
+    bibliography: List['BibReference'] = field(default_factory=list)  # rendered ## References
     sub_articles: List[SubArticle] = field(default_factory=list)
 
     # Metadata for different sources
