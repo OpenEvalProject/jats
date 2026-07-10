@@ -173,6 +173,16 @@ def setup_convert_args(subparsers) -> ArgumentParser:
         help="Strip URL links from references (keep only citation text like 'Author, Year')",
         default=False,
     )
+    subparser.add_argument(
+        "--figure-base",
+        default=None,
+        help=(
+            "Base URL for full-resolution figure images, so figures link to a real image "
+            "instead of the bare (extensionless, broken) filename. bioRxiv figures live at "
+            "<base>/<hwp-id>.large.jpg, e.g. --figure-base "
+            "https://www.biorxiv.org/content/biorxiv/early/YYYY/MM/DD/<id>"
+        ),
+    )
 
     return subparser
 
@@ -204,7 +214,10 @@ def run_convert(parser: ArgumentParser, args: Namespace) -> None:
     validate_convert_args(parser, args)
 
     # Parse JATS XML
-    article = parse_jats_xml(args.xml, manifest_path=args.manifest, no_refs=args.no_refs)
+    article = parse_jats_xml(
+        args.xml, manifest_path=args.manifest, no_refs=args.no_refs,
+        figure_base=getattr(args, "figure_base", None),
+    )
 
     # Convert to markdown
     markdown = convert_to_markdown(article)

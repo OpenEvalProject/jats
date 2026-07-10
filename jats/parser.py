@@ -8,6 +8,12 @@ from lxml import etree
 
 from .models import Article, Author, ContentItem, ElifeAssessment, Figure, Reviewer, Section, SubArticle, Table, TableCell
 
+# Base URL for resolving bioRxiv figure graphics to absolute, full-resolution links.
+# When set (via parse_jats_xml(figure_base=...) / the --figure-base CLI flag), figures emit
+# ![](<base>/<hwp-id>.large.jpg) (hwp-id = "F1", "F2", …) instead of the bare, extensionless
+# filename the XML carries (which is a broken link). Opt-in; default None preserves behavior.
+FIGURE_BASE: Optional[str] = None
+
 
 def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Optional[str]]]:
     """Parse detailed affiliation information from JATS XML.
@@ -649,6 +655,10 @@ def parse_figures(
             href = graphic_elem.get('{http://www.w3.org/1999/xlink}href')
             if href:
                 graphic_href = href
+        # highwire hwp:id lives on the <fig> itself (e.g. "F1") — the bioRxiv full-res
+        # figure asset name (F<N>.large.jpg). Note the <graphic> child carries a different
+        # id ("graphic-N"), so read it from the fig element.
+        graphic_id = fig.get('{http://schema.highwire.org/Journal}id')
 
         # Use manifest mapping if available
         file_path = None
@@ -661,6 +671,7 @@ def parse_figures(
             caption=caption,
             graphic_href=graphic_href,
             file_path=file_path,
+            graphic_id=graphic_id,
         )
 
     return figures
@@ -1370,7 +1381,8 @@ def parse_sub_articles(
 def parse_jats_xml(
     xml_path: Path,
     manifest_path: Optional[Path] = None,
-    no_refs: bool = False
+    no_refs: bool = False,
+    figure_base: Optional[str] = None
 ) -> Article:
     """Parse JATS XML file and return Article object.
 
@@ -1382,6 +1394,8 @@ def parse_jats_xml(
     Returns:
         Article object
     """
+    global FIGURE_BASE
+    FIGURE_BASE = figure_base
     tree = etree.parse(str(xml_path))
     root = tree.getroot()
 
