@@ -7,14 +7,30 @@ first-class supported source, places **Methods, Extended Data / Supplementary fi
 legends, Data/Code availability, Author contributions, Acknowledgements, and the entire
 reference list inside `<back>`.** So `convert` silently dropped ~⅔ of a typical preprint.
 
-Measured on a real bioRxiv preprint (`10.64898/2026.06.30.735642`), and validated across
-**11 bioRxiv splicing papers** from one month:
+### Concrete example: `<back>` holds the entire Methods section
 
-| | `convert` before | `convert` after (this PR) |
+bioRxiv preprint **`10.64898/2026.05.22.727141`** ("OpenSplice: the impact of half a
+million mutations on the alternative splicing of 600 human exons"). In its source XML, the
+`<back>` element contains a `<sec><title>Methods</title>` with **43 subsections and ~6,085
+words** — e.g. `OpenSplice reporter construct`, `Library design`, `Branch point (BP)
+mapping`, `PSI estimation` — plus the 54-entry `<ref-list>`. All of it lived in `<back>`,
+none in `<body>`.
+
+Converting that paper, before vs after this PR:
+
+| | `convert` before (= `--no-back`) | `convert` after (this PR) |
 |---|---:|---:|
-| words | 8,169 | 18,873 |
-| `## Methods` | ✗ | ✓ |
-| `## References` (formatted list) | ✗ | ✓ (47 entries) |
+| words | 7,482 | **18,873** |
+| `## Methods` section | ✗ | ✓ |
+| Methods subsections (e.g. `### Branch point (BP) mapping`) | 0 | present |
+| `## References` (formatted list) | ✗ | ✓ (54 entries) |
+
+Verifiable: `jats convert paper.xml` vs `jats convert paper.xml --no-back` — the latter
+reproduces the old output (7,482 words, no Methods/References), the former recovers the
+`<back>` content (18,873 words). The heading `### Branch point (BP) mapping` appears only
+with the fix. Validated across **11 bioRxiv splicing papers** from one month (July 2026);
+most park references + availability + acknowledgements in `<back>`, and papers like
+OpenSplice put the full Methods there too.
 
 The README already advertised "References (when available)" as output and defines
 `<back>` — this PR makes that promise true. It also fixes a **half-applied-fix
