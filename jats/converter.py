@@ -112,6 +112,15 @@ def format_figure_markdown(figure: Figure, article_id: str = None, is_elife: boo
         else:
             image_path = graphic_href
 
+    # bioRxiv full-resolution figure URL: <figure_base>/<hwp-id>.large.jpg (hwp-id is
+    # "F1", "F2", …). Opt-in via --figure-base; overrides the bare (extensionless) href,
+    # which is otherwise a broken link. NOTE: figures live at a DIFFERENT root than
+    # equations (/content/.../F<N>.large.jpg vs equations' /sites/.../embed/<id>.gif), so
+    # this is a separate base from --image-base.
+    from . import parser as _p
+    if _p.FIGURE_BASE and figure.graphic_id and not is_elife and not figure.file_path:
+        image_path = f"{_p.FIGURE_BASE.rstrip('/')}/{figure.graphic_id}.large.jpg"
+
     if image_path:
         parts.append(f"![{label}]({image_path})")
         parts.append("")

@@ -29,6 +29,7 @@ class Figure:
     caption: Optional[str] = None
     graphic_href: Optional[str] = None
     file_path: Optional[str] = None  # From manifest
+    graphic_id: Optional[str] = None  # highwire hwp:id (e.g. "F1") — bioRxiv asset name
 
 
 @dataclass
