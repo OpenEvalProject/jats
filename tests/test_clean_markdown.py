@@ -105,3 +105,28 @@ def test_artifact_box_glyphs_become_spaces(tmp_path):
     assert "□" not in md                      # no box glyphs leak
     assert "mean ± s.e.m." in md                   # spacing restored
     assert "*P < 0.05." in md
+
+
+FIG_LABEL_XML = """<?xml version="1.0"?>
+<article>
+  <front><article-meta>
+    <title-group><article-title>Fig Label</article-title></title-group>
+  </article-meta></front>
+  <body><sec><title>Results</title>
+    <fig id="fig1"><label>{label}</label>
+      <caption><p>A caption.</p></caption>
+      <graphic xlink:href="f1" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+    </fig>
+  </sec></body>
+</article>
+"""
+
+
+def test_figure_label_trailing_punctuation_not_doubled(tmp_path):
+    # Publisher labels vary: "Figure 1." or "Figure 1:". The caption line appends ":",
+    # so a trailing . or : in the label must be stripped (no "Figure 1::"/"Figure 1.:").
+    for lbl in ("Figure 1.", "Figure 1:", "Figure 1"):
+        md = _md(tmp_path, "fl.xml", FIG_LABEL_XML.format(label=lbl))
+        assert "**Figure 1:** A caption." in md
+        assert "Figure 1::" not in md and "Figure 1.:" not in md
+        assert "![Figure 1](f1)" in md

@@ -92,6 +92,9 @@ def format_figure_markdown(figure: Figure, article_id: str = None, is_elife: boo
     parts = []
 
     label = figure.label or 'Figure'
+    # Some publisher labels already end in punctuation ("Figure 1." / "Figure 1:").
+    # Strip a trailing .:; so the caption below doesn't double it up ("Figure 1::").
+    label = label.rstrip().rstrip('.:;').rstrip()
     caption = figure.caption or ''
 
     # Determine image path
