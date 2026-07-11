@@ -92,6 +92,9 @@ def format_figure_markdown(figure: Figure, article_id: str = None, is_elife: boo
     parts = []
 
     label = figure.label or 'Figure'
+    # Some publisher labels already end in punctuation ("Figure 1." / "Figure 1:").
+    # Strip a trailing .:; so the caption below doesn't double it up ("Figure 1::").
+    label = label.rstrip().rstrip('.:;').rstrip()
     caption = figure.caption or ''
 
     # Determine image path
@@ -150,10 +153,10 @@ def convert_to_markdown(article: Article) -> str:
         for author in article.authors:
             author_line = f"{author.given_names} {author.surname}"
 
-            # Add affiliation superscript
+            # Add affiliation superscript (Markdown ^...^, not raw HTML <sup>)
             if author.affiliation_id and author.affiliation_id in aff_map:
                 aff_num = aff_map[author.affiliation_id]
-                author_line += f"<sup>{aff_num}</sup>"
+                author_line += f"^{aff_num}^"
 
             # Add ORCID
             if author.orcid:

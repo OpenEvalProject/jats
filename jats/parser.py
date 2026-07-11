@@ -8,6 +8,36 @@ from lxml import etree
 
 from .models import Article, Author, ContentItem, ElifeAssessment, Figure, Reviewer, Section, SubArticle, Table, TableCell
 
+# Base URL for resolving image-only equation/figure graphics to absolute links.
+# When set (via parse_jats_xml(image_base=...) / the --image-base CLI flag), image-only
+# <disp-formula>/<inline-formula> emit ![](<base>/embed/<hwp:id>.gif); otherwise they emit
+# the bare filename the XML carries. Module-level so existing function signatures stay stable.
+IMAGE_BASE: Optional[str] = None
+
+# Artifact glyphs some publisher XML uses in place of a (thin/no-break) space — e.g.
+# "mean□±□s.e.m", "P□<□0.05" where □ is U+25A1 WHITE SQUARE. These are broken spacing,
+# not content, so normalize them to a plain space in emitted text. Kept deliberately narrow:
+# only geometric "box" glyphs + the Unicode replacement char, which never carry real meaning.
+_ARTIFACT_SPACE = {
+    "□": " ",  # □ WHITE SQUARE
+    "■": " ",  # ■ BLACK SQUARE
+    "▫": " ",  # ▫ WHITE SMALL SQUARE
+    "▪": " ",  # ▪ BLACK SMALL SQUARE
+    "�": "",   # � REPLACEMENT CHARACTER (dropped entirely)
+}
+_ARTIFACT_TABLE = str.maketrans(_ARTIFACT_SPACE)
+
+
+def clean_artifact_chars(text: str) -> str:
+    """Replace broken spacing/box glyphs (U+25A1 etc.) with a normal space and collapse
+    any resulting double spaces. Content-preserving: only touches known-garbage glyphs."""
+    if not text:
+        return text
+    out = text.translate(_ARTIFACT_TABLE)
+    if out != text:
+        out = re.sub(r"  +", " ", out)
+    return out
+
 
 def parse_affiliations_detailed(root: etree.Element) -> Dict[str, Dict[str, Optional[str]]]:
     """Parse detailed affiliation information from JATS XML.
@@ -386,6 +416,41 @@ def clean_tex_math(tex_text: str) -> str:
 
     tex_text = re.sub(r"\s+", " ", tex_text).strip()
     return tex_text
+
+
+_XLINK_HREF = '{http://www.w3.org/1999/xlink}href'
+_HWP_ID = '{http://schema.highwire.org/Journal}id'
+
+
+def formula_graphic_markdown(formula_elem: etree.Element,
+                             image_base: Optional[str] = None,
+                             inline: bool = False) -> str:
+    """Markdown image link for an equation stored ONLY as a <graphic> (no MathML/TeX).
+
+    Many bioRxiv formulas are image-only. We can't transcribe them from the XML, but we
+    CAN link the image. The link target is the graphic's filename; on bioRxiv the fetchable
+    asset lives at <base>/embed/<hwp:id>.gif (e.g. graphic-4.gif, inline-graphic-1.gif),
+    so when `image_base` is given we build that URL, otherwise we emit the bare href the
+    XML carries (a relative reference the caller can resolve).
+
+    Returns '' if there is no graphic (caller then falls back to a placeholder).
+    """
+    g = formula_elem.find('.//graphic')
+    if g is None:
+        g = formula_elem.find('.//inline-graphic')
+    if g is None:
+        return ''
+    href = g.get(_XLINK_HREF) or ''
+    hwp_id = g.get(_HWP_ID)  # e.g. "graphic-4" / "inline-graphic-1" — the embed filename
+    if image_base and hwp_id:
+        target = f"{image_base.rstrip('/')}/embed/{hwp_id}.gif"
+    else:
+        target = href  # bare filename from the XML; resolvable by the caller
+    if not target:
+        return ''
+    alt = "equation image" if not inline else "eq"
+    md = f"![{alt}]({target})"
+    return md if inline else f"\n\n{md}\n\n"
 
 
 def extract_formula_latex(formula_elem: etree.Element) -> str:
@@ -902,11 +967,17 @@ def extract_text_with_citations(
     # Handle that here so we do not recurse into <alternatives>/<tex-math>.
     if elem.tag == 'inline-formula':
         latex = extract_formula_latex(elem)
-        return f'${latex}$' if latex else ''
+        if latex:
+            return f'${latex}$'
+        img = formula_graphic_markdown(elem, IMAGE_BASE, inline=True)
+        return img or ''
 
     if elem.tag == 'disp-formula':
         latex = extract_formula_latex(elem)
-        return f'\n\n$$\n{latex}\n$$\n\n' if latex else ''
+        if latex:
+            return f'\n\n$$\n{latex}\n$$\n\n'
+        img = formula_graphic_markdown(elem, IMAGE_BASE)
+        return img or '\n\n*[equation: image in source, not transcribable from XML]*\n\n'
 
     # Never expose raw TeX blobs or inline graphic fallbacks as text
     if elem.tag == 'tex-math':
@@ -957,17 +1028,32 @@ def extract_text_with_citations(
                     # No URL available, keep plain text
                     parts.append(figure_text)
 
+        # Superscript / subscript -> Markdown (^x^ / ~x~), not raw <sup>/<sub> HTML.
+        elif child.tag == 'sup':
+            inner = extract_text_with_citations(child, references, figure_urls, no_refs).strip()
+            parts.append(f'^{inner}^' if inner else '')
+        elif child.tag == 'sub':
+            inner = extract_text_with_citations(child, references, figure_urls, no_refs).strip()
+            parts.append(f'~{inner}~' if inner else '')
+
         # Handle inline formulas
         elif child.tag == 'inline-formula':
             latex = extract_formula_latex(child)
             if latex:
                 parts.append(f'${latex}$')
+            else:
+                parts.append(formula_graphic_markdown(child, IMAGE_BASE, inline=True))
 
         # Handle display formulas (embedded in paragraphs)
         elif child.tag == 'disp-formula':
             latex = extract_formula_latex(child)
             if latex:
                 parts.append(f'\n\n$$\n{latex}\n$$\n\n')
+            else:
+                # Image-only equation (no MathML/TeX): link the image if we can, else a
+                # visible placeholder so the sentence isn't left dangling.
+                img = formula_graphic_markdown(child, IMAGE_BASE)
+                parts.append(img or '\n\n*[equation: image in source, not transcribable from XML]*\n\n')
 
         # Handle named-content elements (claim annotations)
         elif child.tag == 'named-content' and child.get('content-type') == 'scientific-claim':
@@ -989,7 +1075,7 @@ def extract_text_with_citations(
         if child.tail:
             parts.append(child.tail)
 
-    return ''.join(parts)
+    return clean_artifact_chars(''.join(parts))
 
 
 def parse_body(
@@ -1040,7 +1126,7 @@ def parse_body(
         title_elem = sec.find('title')
         if title_elem is not None:
             # Use itertext() to get all text including from child elements like <italic>
-            section.title = ''.join(title_elem.itertext()).strip()
+            section.title = clean_artifact_chars(''.join(title_elem.itertext()).strip())
 
         # Get section content (paragraphs and figures in order)
         for child in sec:
@@ -1185,9 +1271,13 @@ def parse_body(
                 latex = extract_formula_latex(child)
                 if latex:
                     formula_text = f'$$\n{latex}\n$$'
-                    section.content_items.append(
-                        ContentItem(item_type='paragraph', text=formula_text)
-                    )
+                else:
+                    # image-only equation: link the image if resolvable, else placeholder
+                    img = formula_graphic_markdown(child, IMAGE_BASE).strip()
+                    formula_text = img or '*[equation: image in source, not transcribable from XML]*'
+                section.content_items.append(
+                    ContentItem(item_type='paragraph', text=formula_text)
+                )
 
             elif child.tag == 'sec':
                 # Nested section - skip for now
@@ -1370,7 +1460,8 @@ def parse_sub_articles(
 def parse_jats_xml(
     xml_path: Path,
     manifest_path: Optional[Path] = None,
-    no_refs: bool = False
+    no_refs: bool = False,
+    image_base: Optional[str] = None
 ) -> Article:
     """Parse JATS XML file and return Article object.
 
@@ -1378,10 +1469,15 @@ def parse_jats_xml(
         xml_path: Path to XML file
         manifest_path: Optional path to manifest.xml
         no_refs: If True, strip URL links from references
+        image_base: Base URL for resolving image-only equation graphics to absolute
+            links (e.g. a bioRxiv `.../early/YYYY/MM/DD/<id>` base → `<base>/embed/
+            <hwp:id>.gif`). If None, image-only equations emit the bare filename.
 
     Returns:
         Article object
     """
+    global IMAGE_BASE
+    IMAGE_BASE = image_base
     tree = etree.parse(str(xml_path))
     root = tree.getroot()
 
