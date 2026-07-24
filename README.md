@@ -36,6 +36,23 @@ pip install -e .
 
 ## Usage
 
+### Create an agent-readable document bundle
+
+The `bundle` command writes annotated Markdown together with a deterministic
+JSON source map. The map retains the raw JATS hash, Markdown hash, stable
+segment identifiers, JATS XPath locations, authors, complete bibliography
+entries, and inline citation-to-reference identifiers.
+
+```bash
+jats bundle paper.xml --markdown paper.md --output paper.json
+```
+
+The Markdown contains unobtrusive `<!-- segment:... -->` markers. Downstream
+tools can require generated evidence to identify one of these segments and can
+verify exact spans against the corresponding `segments[].text` value. JATS XML
+remains the canonical retained source; the Markdown and JSON files are
+deterministic derived artifacts.
+
 ### Basic Conversion
 
 Convert a JATS XML file to Markdown:

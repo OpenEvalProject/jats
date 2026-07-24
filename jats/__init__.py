@@ -7,25 +7,30 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0"
 
-# Core parsing functions
-from .parser import (
-    parse_jats_xml,
-    parse_doi,
-    parse_title,
-    parse_abstract,
-    parse_pub_date,
-    parse_authors,
-    parse_affiliations_detailed,
-)
+# Bundle functions
+from .bundle import build_document_bundle
 
 # Conversion functions
 from .converter import (
-    convert_to_markdown,
-    convert_review_to_markdown,
     convert_response_to_markdown,
+    convert_review_to_markdown,
+    convert_to_markdown,
+)
+
+# Core parsing functions
+from .parser import (
+    parse_abstract,
+    parse_affiliations_detailed,
+    parse_authors,
+    parse_doi,
+    parse_jats_xml,
+    parse_pub_date,
+    parse_title,
 )
 
 __all__ = [
+    # Bundle functions
+    "build_document_bundle",
     # Parser functions
     "parse_jats_xml",
     "parse_doi",

@@ -6,22 +6,24 @@ import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter
 from pathlib import Path
 
+from lxml import etree
+
 from . import __version__
+from .bundle import build_document_bundle
 from .converter import (
     convert_response_to_markdown,
     convert_review_to_markdown,
     convert_to_markdown,
 )
 from .parser import (
-    parse_jats_xml,
-    parse_doi,
-    parse_title,
     parse_abstract,
-    parse_pub_date,
-    parse_authors,
     parse_affiliations_detailed,
+    parse_authors,
+    parse_doi,
+    parse_jats_xml,
+    parse_pub_date,
+    parse_title,
 )
-from lxml import etree
 
 
 def setup_metadata_args(subparsers) -> ArgumentParser:
@@ -175,6 +177,57 @@ def setup_convert_args(subparsers) -> ArgumentParser:
     )
 
     return subparser
+
+
+def setup_bundle_args(subparsers) -> ArgumentParser:
+    """Set up deterministic Markdown and source-map bundle output."""
+    subparser = subparsers.add_parser(
+        "bundle",
+        description=(
+            "Create agent-readable Markdown and a machine-readable JATS source map."
+        ),
+        help="Create annotated Markdown and a JATS source map",
+        formatter_class=RawTextHelpFormatter,
+    )
+    subparser.add_argument("xml", type=Path, help="JATS XML file to process")
+    subparser.add_argument(
+        "--markdown",
+        required=True,
+        type=Path,
+        help="Output path for annotated Markdown",
+    )
+    subparser.add_argument(
+        "-o",
+        "--output",
+        metavar="OUT",
+        type=Path,
+        help="Output JSON source map (default: stdout)",
+        default=None,
+    )
+    return subparser
+
+
+def run_bundle(parser: ArgumentParser, args: Namespace) -> None:
+    """Write a deterministic document bundle."""
+    if not args.xml.is_file():
+        parser.error(f"Input file does not exist: {args.xml}")
+    if args.xml.suffix.lower() not in [".xml", ".jats"]:
+        parser.error(f"Input file must be XML: {args.xml}")
+    for path, label in [(args.markdown, "Markdown"), (args.output, "JSON")]:
+        if path and path.exists() and not path.is_file():
+            parser.error(f"{label} output path exists but is not a file: {path}")
+
+    markdown, bundle = build_document_bundle(args.xml)
+    args.markdown.write_text(markdown, encoding="utf-8")
+    json_output = json.dumps(bundle, indent=2, ensure_ascii=False, sort_keys=True)
+    if args.output:
+        args.output.write_text(json_output + "\n", encoding="utf-8")
+        print(
+            f"Bundled {args.xml} -> {args.markdown}, {args.output}",
+            file=sys.stderr,
+        )
+    else:
+        print(json_output)
 
 
 def validate_convert_args(parser: ArgumentParser, args: Namespace) -> None:
@@ -664,8 +717,9 @@ def validate_elife_score_args(parser: ArgumentParser, args: Namespace) -> None:
 
 def run_elife_score(parser: ArgumentParser, args: Namespace) -> None:
     """Run the elife-score command."""
-    from .parser import extract_elife_assessment
     import dataclasses
+
+    from .parser import extract_elife_assessment
 
     validate_elife_score_args(parser, args)
 
@@ -860,6 +914,7 @@ def setup_parser():
     command_to_parser = {
         "metadata": setup_metadata_args(subparsers),
         "convert": setup_convert_args(subparsers),
+        "bundle": setup_bundle_args(subparsers),
         "find": setup_find_args(subparsers),
         "text": setup_text_args(subparsers),
         "annotate": setup_annotate_args(subparsers),
@@ -883,6 +938,7 @@ def main() -> None:
     command_map = {
         "metadata": run_metadata,
         "convert": run_convert,
+        "bundle": run_bundle,
         "find": run_find,
         "text": run_text,
         "annotate": run_annotate,
