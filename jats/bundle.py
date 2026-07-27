@@ -13,7 +13,7 @@ from lxml import etree
 
 SCHEMA_VERSION = "jats.document-bundle.v1"
 CITATION_SCHEMA_VERSION = "jats.citation-occurrences.v1"
-CITATION_CONTEXT_RULE = "jats:sentence-around-xref:v1"
+CITATION_CONTEXT_RULE = "jats:sentence-around-xref:v2"
 STRUCTURED_DOI_RULE = "jats:reference-pub-id-doi:v1"
 LITERAL_DOI_RULE = "jats:reference-text-doi-exact:v1"
 
