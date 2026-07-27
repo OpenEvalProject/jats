@@ -81,6 +81,29 @@ def test_citation_occurrences_are_deterministic(tmp_path):
     assert build_citation_occurrences(xml_path) == build_citation_occurrences(xml_path)
 
 
+def test_citation_context_does_not_split_on_version_numbers(tmp_path):
+    xml_path = tmp_path / "paper.xml"
+    xml_path.write_text(
+        """<article>
+  <front><article-meta>
+    <article-id pub-id-type="doi">10.1101/example</article-id>
+    <title-group><article-title>Example</article-title></title-group>
+  </article-meta></front>
+  <body><sec><p>An earlier sentence. A model used ranger R v0.14.1 with 500 trees
+  (<xref ref-type="bibr" rid="R1">1</xref>). A later sentence.</p></sec></body>
+  <back><ref-list><ref id="R1"><mixed-citation>
+    <article-title>Reference</article-title>
+    <pub-id pub-id-type="doi">10.1000/example</pub-id>
+  </mixed-citation></ref></ref-list></back>
+</article>"""
+    )
+
+    occurrence = build_citation_occurrences(xml_path)["occurrences"][0]
+    assert occurrence["context"]["text"] == (
+        "A model used ranger R v0.14.1 with 500 trees (1)."
+    )
+
+
 def test_citations_cli_matches_the_library(tmp_path):
     xml_path = tmp_path / "paper.xml"
     output_path = tmp_path / "citations.json"

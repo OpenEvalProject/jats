@@ -313,17 +313,16 @@ def _citation_context_span(text: str, start: int, end: int) -> tuple[int, int]:
     if start < 0 or end < start or end > len(text):
         raise ValueError("citation marker has invalid segment offsets")
 
-    left = start
-    while left > 0:
-        if text[left - 1] in ".!?\n":
+    left = 0
+    for index in range(start - 1, -1, -1):
+        if _sentence_break_after(text, index):
+            left = index + 1
             break
-        left -= 1
 
-    right = end
-    while right < len(text):
-        character = text[right]
-        right += 1
-        if character in ".!?\n":
+    right = len(text)
+    for index in range(end, len(text)):
+        if _sentence_break_after(text, index):
+            right = index + 1
             break
 
     while left < right and text[left].isspace():
@@ -331,6 +330,44 @@ def _citation_context_span(text: str, start: int, end: int) -> tuple[int, int]:
     while right > left and text[right - 1].isspace():
         right -= 1
     return left, right
+
+
+def _sentence_break_after(text: str, index: int) -> bool:
+    character = text[index]
+    if character == "\n":
+        return True
+    if character not in ".!?":
+        return False
+    if index + 1 < len(text) and not text[index + 1].isspace():
+        return False
+
+    next_index = index + 1
+    while next_index < len(text) and text[next_index].isspace():
+        next_index += 1
+    if next_index == len(text):
+        return True
+    while next_index < len(text) and text[next_index] in "'\"([{":
+        next_index += 1
+    if next_index == len(text) or not text[next_index].isupper():
+        return False
+
+    prefix = text[:index].rstrip()
+    token = prefix.rsplit(maxsplit=1)[-1].lower() if prefix else ""
+    abbreviations = {
+        "al",
+        "approx",
+        "dr",
+        "e.g",
+        "etc",
+        "fig",
+        "i.e",
+        "mr",
+        "mrs",
+        "prof",
+        "ref",
+        "vs",
+    }
+    return token not in abbreviations and not re.fullmatch(r"[a-z]", token)
 
 
 def _resolved_reference(reference: dict[str, Any]) -> dict[str, Any]:
