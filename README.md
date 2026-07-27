@@ -53,6 +53,22 @@ verify exact spans against the corresponding `segments[].text` value. JATS XML
 remains the canonical retained source; the Markdown and JSON files are
 deterministic derived artifacts.
 
+### Extract grounded citation occurrences
+
+The `citations` command deterministically connects each inline JATS `xref` to
+its bibliography record and DOI when the DOI is explicitly available. It emits
+exact marker and surrounding-context offsets into retained JATS-derived text.
+
+```bash
+jats citations paper.xml --output citations.json
+```
+
+The output uses `jats.citation-occurrences.v1`. Structured JATS DOI elements
+are preferred. A DOI appearing literally in bibliography text is accepted only
+when exactly one DOI is present; ambiguous and unresolved references remain
+unresolved. Agents may interpret these records, but do not establish DOI
+identity or source offsets.
+
 ### Basic Conversion
 
 Convert a JATS XML file to Markdown:

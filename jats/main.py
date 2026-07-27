@@ -9,7 +9,7 @@ from pathlib import Path
 from lxml import etree
 
 from . import __version__
-from .bundle import build_document_bundle
+from .bundle import build_citation_occurrences, build_document_bundle
 from .converter import (
     convert_response_to_markdown,
     convert_review_to_markdown,
@@ -226,6 +226,52 @@ def run_bundle(parser: ArgumentParser, args: Namespace) -> None:
             f"Bundled {args.xml} -> {args.markdown}, {args.output}",
             file=sys.stderr,
         )
+    else:
+        print(json_output)
+
+
+def setup_citations_args(subparsers) -> ArgumentParser:
+    """Set up deterministic inline-citation extraction."""
+    subparser = subparsers.add_parser(
+        "citations",
+        description=(
+            "Extract exact inline-citation spans and link JATS reference IDs to "
+            "bibliography DOIs."
+        ),
+        help="Extract grounded inline citations to JSON",
+        formatter_class=RawTextHelpFormatter,
+    )
+    subparser.add_argument("xml", type=Path, help="JATS XML file to process")
+    subparser.add_argument(
+        "-o",
+        "--output",
+        metavar="OUT",
+        type=Path,
+        help="Output JSON file (default: stdout)",
+        default=None,
+    )
+    return subparser
+
+
+def run_citations(parser: ArgumentParser, args: Namespace) -> None:
+    """Write deterministic citation occurrences."""
+    if not args.xml.is_file():
+        parser.error(f"Input file does not exist: {args.xml}")
+    if args.xml.suffix.lower() not in [".xml", ".jats"]:
+        parser.error(f"Input file must be XML: {args.xml}")
+    if args.output and args.output.exists() and not args.output.is_file():
+        parser.error(f"JSON output path exists but is not a file: {args.output}")
+
+    citation_bundle = build_citation_occurrences(args.xml)
+    json_output = json.dumps(
+        citation_bundle,
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    if args.output:
+        args.output.write_text(json_output + "\n", encoding="utf-8")
+        print(f"Extracted citations from {args.xml} -> {args.output}", file=sys.stderr)
     else:
         print(json_output)
 
@@ -915,6 +961,7 @@ def setup_parser():
         "metadata": setup_metadata_args(subparsers),
         "convert": setup_convert_args(subparsers),
         "bundle": setup_bundle_args(subparsers),
+        "citations": setup_citations_args(subparsers),
         "find": setup_find_args(subparsers),
         "text": setup_text_args(subparsers),
         "annotate": setup_annotate_args(subparsers),
@@ -939,6 +986,7 @@ def main() -> None:
         "metadata": run_metadata,
         "convert": run_convert,
         "bundle": run_bundle,
+        "citations": run_citations,
         "find": run_find,
         "text": run_text,
         "annotate": run_annotate,

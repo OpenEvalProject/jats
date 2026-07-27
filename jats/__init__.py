@@ -8,7 +8,7 @@ except PackageNotFoundError:
     __version__ = "0.0.0"
 
 # Bundle functions
-from .bundle import build_document_bundle
+from .bundle import build_citation_occurrences, build_document_bundle
 
 # Conversion functions
 from .converter import (
@@ -31,6 +31,7 @@ from .parser import (
 __all__ = [
     # Bundle functions
     "build_document_bundle",
+    "build_citation_occurrences",
     # Parser functions
     "parse_jats_xml",
     "parse_doi",

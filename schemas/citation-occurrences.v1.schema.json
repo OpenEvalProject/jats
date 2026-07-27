@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openevalproject.org/schemas/jats/citation-occurrences.v1.schema.json",
+  "title": "JATS citation occurrences v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "citing_work",
+    "segments",
+    "references",
+    "occurrences"
+  ],
+  "properties": {
+    "schema_version": {"const": "jats.citation-occurrences.v1"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sha256", "media_type"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^source:sha256:[0-9a-f]{64}$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "media_type": {"const": "application/xml"}
+      }
+    },
+    "citing_work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doi", "title"],
+      "properties": {
+        "doi": {"type": ["string", "null"]},
+        "title": {"type": "string"}
+      }
+    },
+    "segments": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/segment"}
+    },
+    "references": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/reference"}
+    },
+    "occurrences": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/occurrence"}
+    }
+  },
+  "$defs": {
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "xpath", "text"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "xpath": {"type": "string", "minLength": 1},
+        "text": {"type": "string", "minLength": 1}
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "title",
+        "year",
+        "text",
+        "xpath",
+        "doi",
+        "doi_resolution_rule"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "label": {"type": "string"},
+        "title": {"type": "string"},
+        "year": {"type": ["integer", "null"]},
+        "text": {"type": "string", "minLength": 1},
+        "xpath": {"type": "string", "minLength": 1},
+        "doi": {"type": ["string", "null"]},
+        "doi_resolution_rule": {
+          "type": ["string", "null"],
+          "enum": [
+            "jats:reference-pub-id-doi:v1",
+            "jats:reference-text-doi-exact:v1",
+            null
+          ]
+        }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "start", "end", "text"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^span:sha256:[0-9a-f]{64}$"},
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 0},
+        "text": {"type": "string", "minLength": 1}
+      }
+    },
+    "context_span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "start", "end", "text", "rule"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^span:sha256:[0-9a-f]{64}$"},
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 0},
+        "text": {"type": "string", "minLength": 1},
+        "rule": {"const": "jats:sentence-around-xref:v1"}
+      }
+    },
+    "occurrence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "segment", "marker", "context", "reference_ids"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^citation_occurrence:sha256:[0-9a-f]{64}$"
+        },
+        "segment": {"type": "string", "minLength": 1},
+        "marker": {"$ref": "#/$defs/span"},
+        "context": {"$ref": "#/$defs/context_span"},
+        "reference_ids": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

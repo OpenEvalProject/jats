@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,12 @@ from typing import Any, Iterable, Optional
 from lxml import etree
 
 SCHEMA_VERSION = "jats.document-bundle.v1"
+CITATION_SCHEMA_VERSION = "jats.citation-occurrences.v1"
+CITATION_CONTEXT_RULE = "jats:sentence-around-xref:v1"
+STRUCTURED_DOI_RULE = "jats:reference-pub-id-doi:v1"
+LITERAL_DOI_RULE = "jats:reference-text-doi-exact:v1"
+
+_DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
 
 
 @dataclass
@@ -27,6 +34,33 @@ def _local_name(element: etree._Element) -> str:
 
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+def _normalize_doi(value: str) -> str:
+    normalized = value.strip().lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix) :]
+    return normalized.rstrip(".,;:")
+
+
+def _literal_dois(value: str) -> list[str]:
+    dois = {
+        normalized
+        for match in _DOI_PATTERN.findall(value)
+        if (normalized := _normalize_doi(match.rstrip(")]}>")))
+    }
+    return sorted(dois)
+
+
+def _content_id(prefix: str, value: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"{prefix}:sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
 def _element_text(element: etree._Element) -> str:
@@ -272,6 +306,139 @@ def _citation_records(
                 }
             )
     return citations
+
+
+def _citation_context_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """Return deterministic sentence-like boundaries around an inline citation."""
+    if start < 0 or end < start or end > len(text):
+        raise ValueError("citation marker has invalid segment offsets")
+
+    left = start
+    while left > 0:
+        if text[left - 1] in ".!?\n":
+            break
+        left -= 1
+
+    right = end
+    while right < len(text):
+        character = text[right]
+        right += 1
+        if character in ".!?\n":
+            break
+
+    while left < right and text[left].isspace():
+        left += 1
+    while right > left and text[right - 1].isspace():
+        right -= 1
+    return left, right
+
+
+def _resolved_reference(reference: dict[str, Any]) -> dict[str, Any]:
+    structured = _normalize_doi(str(reference.get("doi") or ""))
+    rule: Optional[str] = None
+    doi: Optional[str] = None
+    if structured:
+        doi = structured
+        rule = STRUCTURED_DOI_RULE
+    else:
+        candidates = _literal_dois(str(reference.get("text") or ""))
+        if len(candidates) == 1:
+            doi = candidates[0]
+            rule = LITERAL_DOI_RULE
+    return {
+        "id": reference["id"],
+        "label": reference.get("label") or "",
+        "title": reference.get("title") or "",
+        "year": reference.get("year"),
+        "text": reference.get("text") or "",
+        "xpath": reference.get("xpath") or "",
+        "doi": doi,
+        "doi_resolution_rule": rule,
+    }
+
+
+def build_citation_occurrences(xml_path: Path) -> dict[str, Any]:
+    """Extract exact inline-citation spans and their JATS bibliography targets."""
+    _, bundle = build_document_bundle(xml_path)
+    source_sha256 = bundle["source"]["sha256"]
+    segment_by_id = {segment["id"]: segment for segment in bundle["segments"]}
+    references = [_resolved_reference(reference) for reference in bundle["references"]]
+    reference_by_id = {reference["id"]: reference for reference in references}
+    cited_segment_ids: set[str] = set()
+    occurrences: list[dict[str, Any]] = []
+
+    for citation in bundle["citations"]:
+        segment_id = citation["segment"]
+        segment = segment_by_id.get(segment_id)
+        start = citation.get("start")
+        end = citation.get("end")
+        if segment is None or not isinstance(start, int) or not isinstance(end, int):
+            continue
+        text = segment["text"]
+        marker = citation["marker"]
+        if text[start:end] != marker:
+            raise ValueError("citation marker does not match its retained segment")
+
+        context_start, context_end = _citation_context_span(text, start, end)
+        reference_ids = [
+            reference_id
+            for reference_id in citation.get("reference_ids") or []
+            if reference_id in reference_by_id
+        ]
+        identity = {
+            "source_sha256": source_sha256,
+            "segment": segment_id,
+            "start": start,
+            "end": end,
+            "reference_ids": reference_ids,
+        }
+        marker_span = {
+            "start": start,
+            "end": end,
+            "text": marker,
+        }
+        marker_span["id"] = _content_id(
+            "span", {**identity, "kind": "citation_marker", **marker_span}
+        )
+        context_span = {
+            "start": context_start,
+            "end": context_end,
+            "text": text[context_start:context_end],
+            "rule": CITATION_CONTEXT_RULE,
+        }
+        context_span["id"] = _content_id(
+            "span", {**identity, "kind": "citation_context", **context_span}
+        )
+        occurrence = {
+            "segment": segment_id,
+            "marker": marker_span,
+            "context": context_span,
+            "reference_ids": reference_ids,
+        }
+        occurrence["id"] = _content_id("citation_occurrence", identity)
+        occurrences.append(occurrence)
+        cited_segment_ids.add(segment_id)
+
+    segments = [
+        {
+            "id": segment["id"],
+            "xpath": segment.get("xpath") or "",
+            "text": segment["text"],
+        }
+        for segment in bundle["segments"]
+        if segment["id"] in cited_segment_ids
+    ]
+    return {
+        "schema_version": CITATION_SCHEMA_VERSION,
+        "source": bundle["source"],
+        "citing_work": {
+            "doi": _normalize_doi(bundle["metadata"].get("doi") or "") or None,
+            "title": bundle["metadata"].get("title") or "",
+        },
+        "segments": segments,
+        "references": references,
+        "occurrences": occurrences,
+    }
 
 
 def build_document_bundle(xml_path: Path) -> tuple[str, dict[str, Any]]:
