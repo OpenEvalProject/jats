@@ -180,8 +180,11 @@ def convert_to_markdown(article: Article) -> str:
 
                 md_parts.append(aff_line)
 
-        md_parts.append("")
-        md_parts.append("† Corresponding author\n")
+        # Only show the corresponding-author legend when an author actually
+        # carries the mark; otherwise the footnote dangles with no referent.
+        if any(author.corresponding for author in article.authors):
+            md_parts.append("")
+            md_parts.append("† Corresponding author\n")
 
     # Abstract
     if article.abstract:
